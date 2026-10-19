@@ -1,0 +1,3 @@
+# Initial maze generator and tests use only the Python standard library.
+# RL dependencies (gymnasium, torch, stable-baselines3) will be pinned
+# after selecting and validating the training environment.
