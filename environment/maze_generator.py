@@ -62,11 +62,12 @@ def _odd_cells(size: int) -> list[Point]:
     return [(x, y) for y in range(1, size - 1, 2) for x in range(1, size - 1, 2)]
 
 
-def generate_maze(size: int = 32, algorithm: str = "dfs", seed: int | None = None) -> Maze:
+def generate_maze(size: int = 64, algorithm: str = "dfs", seed: int | None = None,
+                  min_path_length: int | None = None) -> Maze:
     """Generate a connected perfect maze using randomized DFS or randomized Prim.
 
-    Even-sized grids retain a solid outer border. Cell corridors occupy odd
-    coordinates; the unused final row/column remains wall where necessary.
+    Only two non-corner boundary openings are carved, on distinct sides.
+    min_path_length counts forward cells, not rotation-aware action turns.
     """
     if size < 5:
         raise ValueError("size must be at least 5")
@@ -111,20 +112,31 @@ def generate_maze(size: int = 32, algorithm: str = "dfs", seed: int | None = Non
             visited.add(nxt)
             frontier.extend((nxt, q) for q in candidates(nxt))
 
-    # Choose the farthest reachable odd cell as goal to avoid trivial mazes.
-    queue = deque([origin])
-    distance = {origin: 0}
-    while queue:
-        current = queue.popleft()
-        for nxt in neighbors(current):
-            x, y = nxt
-            if 0 <= x < size and 0 <= y < size and grid[y][x] == 0 and nxt not in distance:
-                distance[nxt] = distance[current] + 1
-                queue.append(nxt)
-    goal = max((p for p in cells if p in distance), key=lambda p: distance[p])
-    maze = Maze(grid, origin, goal)
-    assert shortest_path(maze) is not None
-    return maze
+    minimum = size if min_path_length is None else min_path_length
+    if minimum < 1 or minimum > size * size - 1:
+        raise ValueError("min_path_length must be between 1 and size*size-1")
+    last = max(x for x, _ in cells)
+    ports = []
+    for k in range(1, last + 1, 2):
+        ports.extend([
+            (0, (k, 0), [(k, 0)]),
+            (1, (size-1, k), [(x, k) for x in range(last+1, size)]),
+            (2, (k, size-1), [(k, y) for y in range(last+1, size)]),
+            (3, (0, k), [(0, k)]),
+        ])
+    # Bounded rejection sampling avoids hanging on impossible constraints.
+    for _ in range(512):
+        first, second = rng.sample(ports, 2)
+        if first[0] == second[0]:
+            continue
+        candidate = [row[:] for row in grid]
+        for x, y in first[2] + second[2]:
+            candidate[y][x] = 0
+        maze = Maze(candidate, first[1], second[1])
+        path = shortest_path(maze)
+        if path is not None and len(path)-1 >= minimum:
+            return maze
+    raise ValueError("No endpoint pair found within 512 attempts; use another seed or lower min_path_length")
 
 
 def try_add_wall(maze: Maze, point: Point, agent_position: Point | None = None) -> bool:
@@ -159,12 +171,13 @@ def render_ascii(maze: Maze, show_path: bool = False) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate and validate a random maze")
-    parser.add_argument("--size", type=int, default=32)
+    parser.add_argument("--size", type=int, default=64)
     parser.add_argument("--algorithm", choices=("dfs", "prim"), default="dfs")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--min-path-length", type=int, default=None)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
-    maze = generate_maze(args.size, args.algorithm, args.seed)
+    maze = generate_maze(args.size, args.algorithm, args.seed, args.min_path_length)
     path = shortest_path(maze)
     print(f"size={maze.size} algorithm={args.algorithm} start={maze.start} goal={maze.goal} shortest_path_steps={len(path) - 1}")
     if not args.quiet:
@@ -173,3 +186,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
