@@ -10,3 +10,11 @@ checkpoints/
 *.pth
 *.zip
 .DS_Store
+
+
+ppo_model.json
+ppo_test_model.json
+
+ppo_v2_model.json
+
+ppo_v3_model.json

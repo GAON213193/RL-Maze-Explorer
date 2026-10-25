@@ -1,0 +1,88 @@
+{
+  "trained": [
+    {
+      "episodes": 30,
+      "seed": 10000,
+      "deterministic": true,
+      "size": 7,
+      "success_rate": 0.06666666666666667,
+      "outcomes": {
+        "battery_depleted": 10,
+        "stalled": 6,
+        "success": 2,
+        "insufficient_energy": 12
+      },
+      "actions": {
+        "0": 367,
+        "1": 127,
+        "2": 111,
+        "3": 50
+      },
+      "mean_unique_cells": 9.7,
+      "mean_moves": 10.066666666666666,
+      "mean_turns": 21.833333333333332
+    },
+    {
+      "episodes": 30,
+      "seed": 10000,
+      "deterministic": false,
+      "size": 7,
+      "success_rate": 0.03333333333333333,
+      "outcomes": {
+        "insufficient_energy": 12,
+        "battery_depleted": 17,
+        "success": 1
+      },
+      "actions": {
+        "0": 491,
+        "1": 112,
+        "2": 107,
+        "3": 81
+      },
+      "mean_unique_cells": 10.5,
+      "mean_moves": 13.166666666666666,
+      "mean_turns": 27.433333333333334
+    }
+  ],
+  "untrained": [
+    {
+      "episodes": 30,
+      "seed": 10000,
+      "deterministic": true,
+      "size": 7,
+      "success_rate": 0.0,
+      "outcomes": {
+        "stalled": 29,
+        "insufficient_energy": 1
+      },
+      "actions": {
+        "2": 377,
+        "1": 343
+      },
+      "mean_unique_cells": 1.0,
+      "mean_moves": 0.0,
+      "mean_turns": 24.0
+    },
+    {
+      "episodes": 30,
+      "seed": 10000,
+      "deterministic": false,
+      "size": 7,
+      "success_rate": 0.0,
+      "outcomes": {
+        "battery_depleted": 12,
+        "stalled": 15,
+        "insufficient_energy": 3
+      },
+      "actions": {
+        "3": 325,
+        "2": 289,
+        "0": 283,
+        "1": 276
+      },
+      "mean_unique_cells": 3.1666666666666665,
+      "mean_moves": 2.966666666666667,
+      "mean_turns": 52.3
+    }
+  ]
+}
