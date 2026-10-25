@@ -1,5 +1,9 @@
 # RL-Maze-Explorer
 
+현재 학습 기본값은 탐색 v2(7×7 기초 단계)입니다. 최종 목표 64×64는 유지합니다.
+기존 실패 모델은 보존하며 새 버전은 자동으로 이어받지 않습니다.
+실행 방법·변경 규칙·검증 결과: [docs/TRAINING_V2.md](docs/TRAINING_V2.md).
+
 강화학습 기반 동적 환경 적응형 의사결정 모델 개발 — 인공지능응용 과제
 
 ## 현재 구현
@@ -11,11 +15,11 @@
 - 방향을 포함한 최소 턴 경로 계산. 동일 턴이면 에너지가 적은 경로 선택.
 - 수동 조작 데스크톱 화면: 전체 지도와 관측·기억 지도, 배터리·턴·충전 표시.
 - Gymnasium 연결 및 공개 PPO 학습·저장·이어 학습 스크립트.
-- 26개 자동 테스트 (학습 테스트에는 requirements-rl.txt 설치 필요).
+- 32개 자동 테스트 (학습 테스트에는 requirements-rl.txt 설치 필요).
 
 **PPO 연결과 짧은 학습 테스트를 완료했습니다.**
 `train_ppo.bat`: GitHub 저장/이어 학습, `watch_ppo.bat`: 모델 재생, `sync_ppo.bat`: 미전송 백업 업로드.
-주 저장소는 GitHub Releases이며 루트의 ppo_model.zip은 로컬 백업입니다. 직접 학습하는 방법과 검증 기록은
+주 저장소는 GitHub Releases이며 루트의 ppo_v2_model.zip은 로컬 백업입니다. 직접 학습하는 방법과 검증 기록은
 [docs/TRAINING.md](docs/TRAINING.md)를 참고하십시오. 탈출 성능 검증, 브라우저 추론 및 웹 편집 화면은 후속 작업입니다.
 
 ## 실행 (Python 3.10 이상)

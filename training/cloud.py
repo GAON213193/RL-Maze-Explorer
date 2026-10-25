@@ -65,11 +65,11 @@ def extract_bundle(bundle, destination):
             (destination / name).write_bytes(z.read(name))
 
 
-def download_latest():
+def download_latest(prefix=PREFIX):
     pages = json.loads(gh('api', f'repos/{REPO}/releases', '--paginate', '--slurp'))
     candidates = [(a['created_at'], r['created_at'], r['tag_name'], a['name'])
                   for page in pages for r in page
-                  if r['tag_name'].startswith(PREFIX) and not r['draft']
+                  if r['tag_name'].startswith(prefix) and not r['draft']
                   for a in r['assets'] if re.fullmatch(r'checkpoint-\d+\.zip', a['name'])]
     if not candidates:
         return None

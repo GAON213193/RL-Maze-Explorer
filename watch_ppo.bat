@@ -4,8 +4,8 @@ cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" goto setup
 ".venv\Scripts\python.exe" -c "import torch, stable_baselines3, gymnasium" >nul 2>&1
 if errorlevel 1 goto setup
-echo [1] Download latest GitHub model and replay
-echo [2] Replay local backup ppo_model.zip
+echo [1] Download latest v2 GitHub model and replay
+echo [2] Replay local backup ppo_v2_model.zip
 choice /c 12 /n /m "Choose 1 or 2: "
 if errorlevel 2 goto local
 where gh >nul 2>&1

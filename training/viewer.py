@@ -4,14 +4,15 @@ import json
 from pathlib import Path
 import torch
 from stable_baselines3 import PPO
-from environment.gym_env import MazeGymEnv
+from .profiles import make_env
 from environment.robot import Config, DIRECTIONS
 from .cloud import download_latest
 
 
 def load_session(model_path, config_path, seed):
-    config = Config(**json.loads(config_path.read_text(encoding='utf-8'))['environment'])
-    env = MazeGymEnv(config)
+    saved = json.loads(config_path.read_text(encoding='utf-8'))
+    config = Config(**saved['environment'])
+    env = make_env(config, saved.get('profile', 'legacy-v1'))
     model = PPO.load(model_path, env=env, device='cpu')
     obs, _ = env.reset(seed=seed)
     return model, env, obs
@@ -20,7 +21,7 @@ def load_session(model_path, config_path, seed):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--local', action='store_true', help='Use root local backup instead of GitHub')
-    p.add_argument('--model', type=Path, default=Path('ppo_model.zip'))
+    p.add_argument('--model', type=Path, default=Path('ppo_v2_model.zip'))
     p.add_argument('--seed', type=int, default=12345)
     p.add_argument('--headless', type=int, default=0, help='Run this many actions without a window')
     args = p.parse_args()
@@ -28,7 +29,7 @@ def main():
     if args.local:
         model_path, config_path = args.model, args.model.with_suffix('.json')
     else:
-        folder = download_latest()
+        folder = download_latest(prefix='ppo-v2-')
         if folder is None:
             raise SystemExit('No GitHub checkpoint yet. Train first, or use --local.')
         model_path, config_path = folder/'model.zip', folder/'config.json'
