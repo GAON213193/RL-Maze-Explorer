@@ -3,9 +3,11 @@ import argparse
 from dataclasses import asdict
 from datetime import datetime
 import json
-import shutil
 from pathlib import Path
 import time
+import uuid
+from .checkpoints import Checkpoints
+from .cloud import check_access, sync_pending, download_latest
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
@@ -16,6 +18,9 @@ from environment.robot import Config
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument('--cloud', action='store_true', help='Save checkpoints to GitHub Releases')
+    p.add_argument('--auto-resume', action='store_true', help='Resume latest GitHub checkpoint if present')
+    p.add_argument('--save-every', type=int, default=10000)
     p.add_argument('--steps', type=int, default=100_000)
     p.add_argument('--size', type=int, default=64)
     p.add_argument('--algorithm', choices=['dfs', 'prim'], default='dfs')
@@ -27,6 +32,15 @@ def main():
     p.add_argument('--model-path', type=Path, help='Also copy the saved model here (replaces an existing file)')
     p.add_argument('--resume', type=Path, help='Previous run directory with model.zip and config.json')
     args = p.parse_args()
+    if args.save_every < 1:
+        p.error('save-every must be positive')
+    if args.auto_resume and (not args.cloud or args.resume):
+        p.error('auto-resume requires cloud and cannot be combined with resume')
+    if args.cloud:
+        check_access()
+        sync_pending()
+        if args.auto_resume:
+            args.resume = download_latest()
     if args.steps < 1 or args.threads < 1:
         p.error('steps and threads must be positive')
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -44,19 +58,21 @@ def main():
                                      n_epochs=4, learning_rate=3e-4, ent_coef=0.01,
                                      policy_kwargs=dict(net_arch=dict(pi=[128, 128], vf=[128, 128])),
                                      seed=args.seed, device=args.device, verbose=1))
+    cloud_tag = 'ppo-run-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
     (output / 'config.json').write_text(json.dumps({'environment': asdict(config),
-        'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
+        'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
+    callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)
     start_steps = model.num_timesteps
     started = time.perf_counter()
     interrupted = False
     try:
-        model.learn(total_timesteps=args.steps, reset_num_timesteps=not bool(args.resume))
+        model.learn(total_timesteps=args.steps, reset_num_timesteps=not bool(args.resume), callback=callback)
     except KeyboardInterrupt:
         interrupted = True
         print('Interrupted: saving current model.')
     finally:
-        model.save(output / 'model.zip')
+        callback.save()
         env.close()
     elapsed = time.perf_counter() - started
     summary = {'steps_this_run': model.num_timesteps - start_steps,
@@ -64,11 +80,8 @@ def main():
     (output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     print('Saved:', output.resolve())
-    if args.model_path:
-        args.model_path.parent.mkdir(parents=True, exist_ok=True)
-        if args.model_path.resolve() != (output / 'model.zip').resolve():
-            shutil.copy2(output / 'model.zip', args.model_path)
-        print('Model:', args.model_path.resolve())
+    if args.cloud and callback.last_uploaded != model.num_timesteps:
+        raise SystemExit('Training saved locally, but GitHub upload failed. Run sync_ppo.bat to retry.')
 
 
 if __name__ == '__main__':
