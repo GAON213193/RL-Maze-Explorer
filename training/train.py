@@ -3,6 +3,7 @@ import argparse
 from dataclasses import asdict
 from datetime import datetime
 import json
+import shutil
 from pathlib import Path
 import time
 import torch
@@ -23,6 +24,7 @@ def main():
     p.add_argument('--device', choices=['cpu', 'cuda', 'auto'], default='cpu')
     p.add_argument('--threads', type=int, default=1)
     p.add_argument('--output', type=Path, default=None)
+    p.add_argument('--model-path', type=Path, help='Also copy the saved model here (replaces an existing file)')
     p.add_argument('--resume', type=Path, help='Previous run directory with model.zip and config.json')
     args = p.parse_args()
     if args.steps < 1 or args.threads < 1:
@@ -62,6 +64,11 @@ def main():
     (output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     print('Saved:', output.resolve())
+    if args.model_path:
+        args.model_path.parent.mkdir(parents=True, exist_ok=True)
+        if args.model_path.resolve() != (output / 'model.zip').resolve():
+            shutil.copy2(output / 'model.zip', args.model_path)
+        print('Model:', args.model_path.resolve())
 
 
 if __name__ == '__main__':
