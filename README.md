@@ -10,10 +10,11 @@
 - 시작점 반복 충전 및 기억 유지.
 - 방향을 포함한 최소 턴 경로 계산. 동일 턴이면 에너지가 적은 경로 선택.
 - 수동 조작 데스크톱 화면: 전체 지도와 관측·기억 지도, 배터리·턴·충전 표시.
-- 19개 자동 테스트.
+- Gymnasium 연결 및 공개 PPO 학습·저장·이어 학습 스크립트.
+- 21개 자동 테스트 (학습 테스트에는 requirements-rl.txt 설치 필요).
 
-**아직 PPO 모델을 학습한 상태가 아닙니다.** Gymnasium 연동, 학습 스크립트, 체크포인트 비교,
-브라우저 추론 및 웹 편집 화면은 후속 작업입니다. 수동 데모나 환경 테스트를 AI 학습 결과로 보고하지 않습니다.
+**PPO 연결과 짧은 학습 테스트를 완료했습니다.** 직접 학습하는 방법과 검증 기록은
+[docs/TRAINING.md](docs/TRAINING.md)를 참고하십시오. 탈출 성능 검증, 브라우저 추론 및 웹 편집 화면은 후속 작업입니다.
 
 ## 실행 (Python 3.10 이상)
 
@@ -24,7 +25,8 @@ python -m environment.demo
 python -m environment.demo --size 16 --algorithm prim --seed 7
 python -m environment.demo --size 64 --battery-margin 1.5 --charge-turns 10
 python -m environment.demo --headless
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -p test_maze.py -v
+python -m unittest discover -s tests -p test_robot.py -v
 python -m environment.maze_generator --size 64 --algorithm prim --seed 7 --quiet
 ```
 
