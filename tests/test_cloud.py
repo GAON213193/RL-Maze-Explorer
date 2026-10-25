@@ -64,6 +64,13 @@ class CloudTests(unittest.TestCase):
             self.assertIsNone(download_latest(prefix='ppo-v2-'))
             self.assertEqual(mocked.call_count,1)
 
+    def test_v3_ignores_v2(self):
+        releases=[[{'tag_name':'ppo-v2-old','draft':False,'created_at':'2026-10-25',
+                    'assets':[{'name':'checkpoint-200192.zip','created_at':'2026-10-25T03:00'}]}]]
+        with patch('training.cloud.gh', return_value=json.dumps(releases)) as mocked:
+            self.assertIsNone(download_latest(prefix='ppo-v3-'))
+            self.assertEqual(mocked.call_count,1)
+
     def test_network_failure_is_not_new_training(self):
         with patch('training.cloud.gh', side_effect=RuntimeError('offline')):
             with self.assertRaises(RuntimeError): download_latest()

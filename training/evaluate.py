@@ -10,7 +10,7 @@ from environment.robot import Config
 
 
 def evaluate(model, env, episodes=30, seed=10000, deterministic=True):
-    outcomes=Counter(); actions=Counter(); cells=[]; turns=[]; moves=[]
+    outcomes=Counter(); actions=Counter(); cells=[]; turns=[]; moves=[]; charging=Counter(); scenarios=Counter()
     for i in range(episodes):
         torch.manual_seed(seed+i)
         obs,_=env.reset(seed=seed+i)
@@ -19,12 +19,18 @@ def evaluate(model, env, episodes=30, seed=10000, deterministic=True):
             actions[int(action)]+=1
             obs,_,terminated,truncated,info=env.step(int(action))
             if terminated or truncated: break
+        scenarios[info.get('scenario', 'navigation')] += 1
+        charging['episodes_with_charge'] += env.robot.charges > 0
+        charging['total_charges'] += env.robot.charges
+        charging['returns'] += bool(info.get('returned_to_station'))
+        charging['charged_after_return'] += bool(info.get('charged_after_return'))
+        charging['success_after_charge'] += info['is_success'] and env.robot.charges > 0
         outcomes[info['reason'] or 'evaluation_limit']+=1
         turns.append(env.robot.turns)
         cells.append(len(set(env.robot.trajectory)))
-        moves.append(sum(a!=b for a,b in zip(env.robot.trajectory,env.robot.trajectory[1:])))
+        moves.append(info.get('forward_moves', sum(a!=b for a,b in zip(env.robot.trajectory,env.robot.trajectory[1:]))))
     return dict(episodes=episodes,seed=seed,deterministic=deterministic,size=env.config.size,
-                success_rate=outcomes['success']/episodes,outcomes=dict(outcomes),actions=dict(actions),
+                charging=dict(charging), scenarios=dict(scenarios), success_rate=outcomes['success']/episodes,outcomes=dict(outcomes),actions=dict(actions),
                 mean_unique_cells=sum(cells)/episodes,mean_moves=sum(moves)/episodes,
                 mean_turns=sum(turns)/episodes)
 
@@ -35,12 +41,13 @@ def main():
     p.add_argument('--episodes',type=int,default=30)
     p.add_argument('--seed',type=int,default=10000)
     p.add_argument('--output',type=Path)
+    p.add_argument('--practice', action='store_true', help='Evaluate return-practice starts separately')
     p.add_argument('--untrained',action='store_true')
     args=p.parse_args()
     if args.episodes < 1: p.error('episodes must be positive')
     torch.set_num_threads(1)
     config=json.loads((args.run/'config.json').read_text())
-    env=make_env(Config(**config['environment']),config.get('profile','legacy-v1'))
+    env=make_env(Config(**config['environment']),config.get('profile','legacy-v1'), 1.0 if args.practice else 0.0)
     model=(PPO('MultiInputPolicy',env,seed=42,device='cpu',
                policy_kwargs=dict(net_arch=dict(pi=[128,128],vf=[128,128]))) if args.untrained else
            PPO.load(args.run/'model.zip',env=env,device='cpu'))

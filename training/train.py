@@ -13,7 +13,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from .profiles import make_env
-from environment.gym_v2 import PROFILE
+from environment.gym_v3 import PROFILE
 from dataclasses import replace
 from environment.robot import Config
 
@@ -24,6 +24,7 @@ def main():
     p.add_argument('--auto-resume', action='store_true', help='Resume latest GitHub checkpoint if present')
     p.add_argument('--save-every', type=int, default=10000)
     p.add_argument('--steps', type=int, default=100_000)
+    p.add_argument('--lesson-probability', type=float, default=None)
     p.add_argument('--size', type=int, default=None)
     p.add_argument('--algorithm', choices=['dfs', 'prim'], default='dfs')
     p.add_argument('--max-turns', type=int, default=None)
@@ -42,7 +43,7 @@ def main():
         check_access()
         sync_pending()
         if args.auto_resume:
-            args.resume = download_latest(prefix="ppo-v2-")
+            args.resume = download_latest(prefix="ppo-v3-")
     if args.steps < 1 or args.threads < 1:
         p.error('steps and threads must be positive')
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -50,14 +51,17 @@ def main():
     torch.set_num_threads(args.threads)
     saved = json.loads((args.resume / 'config.json').read_text()) if args.resume else None
     if saved and saved.get('profile') != PROFILE:
-        p.error('Version 1 checkpoints are archived and cannot resume under v2 rewards. Start a new model.')
-    size = args.size or (saved['environment']['size'] if saved else 7)
-    max_turns = args.max_turns or (saved['environment']['max_turns'] if saved and args.size is None else 4*size*size)
-    config = (replace(Config(**saved['environment']), size=size, max_turns=max_turns) if saved else
-              Config(size=size, algorithm=args.algorithm, max_turns=max_turns))
+        p.error('Earlier checkpoints are archived and cannot resume under v3 observations. Start a new model.')
+    size = args.size or (saved['environment']['size'] if saved else 64)
+    max_turns = args.max_turns or (saved['environment']['max_turns'] if saved and args.size is None else max(196, 4*size*size))
+    config = (replace(Config(**saved['environment']), size=size, max_turns=max_turns, charge_turns=2) if saved else
+              Config(size=size, algorithm=args.algorithm, max_turns=max_turns, charge_turns=2))
     output = args.output or Path('runs') / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     output.mkdir(parents=True, exist_ok=False)
-    env = make_env(config, PROFILE)
+    lesson_probability = args.lesson_probability if args.lesson_probability is not None else (saved.get('lesson_probability', 0.3) if saved else 0.3)
+    if not 0 <= lesson_probability <= 1:
+        p.error('lesson-probability must be between 0 and 1')
+    env = make_env(config, PROFILE, lesson_probability)
     check_env(env, warn=True)
     env = Monitor(env, str(output / 'monitor.csv'), info_keywords=('is_success', 'turns'))
     model = (PPO.load(args.resume / 'model.zip', env=env, device=args.device)
@@ -65,9 +69,9 @@ def main():
                                      n_epochs=4, learning_rate=3e-4, ent_coef=0.02,
                                      policy_kwargs=dict(net_arch=dict(pi=[128, 128], vf=[128, 128])),
                                      seed=args.seed, device=args.device, verbose=1))
-    cloud_tag = 'ppo-v2-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
+    cloud_tag = 'ppo-v3-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
     (output / 'config.json').write_text(json.dumps({'environment': asdict(config),
-        'profile': PROFILE, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
+        'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
     callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)
     start_steps = model.num_timesteps

@@ -9,10 +9,10 @@ from environment.robot import Config, DIRECTIONS
 from .cloud import download_latest
 
 
-def load_session(model_path, config_path, seed):
+def load_session(model_path, config_path, seed, practice=False):
     saved = json.loads(config_path.read_text(encoding='utf-8'))
     config = Config(**saved['environment'])
-    env = make_env(config, saved.get('profile', 'legacy-v1'))
+    env = make_env(config, saved.get('profile', 'legacy-v1'), 1.0 if practice else 0.0)
     model = PPO.load(model_path, env=env, device='cpu')
     obs, _ = env.reset(seed=seed)
     return model, env, obs
@@ -20,8 +20,9 @@ def load_session(model_path, config_path, seed):
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument('--practice', action='store_true', help='Show return-and-charge practice starts')
     p.add_argument('--local', action='store_true', help='Use root local backup instead of GitHub')
-    p.add_argument('--model', type=Path, default=Path('ppo_v2_model.zip'))
+    p.add_argument('--model', type=Path, default=Path('ppo_v3_model.zip'))
     p.add_argument('--seed', type=int, default=12345)
     p.add_argument('--headless', type=int, default=0, help='Run this many actions without a window')
     args = p.parse_args()
@@ -29,11 +30,11 @@ def main():
     if args.local:
         model_path, config_path = args.model, args.model.with_suffix('.json')
     else:
-        folder = download_latest(prefix='ppo-v2-')
+        folder = download_latest(prefix='ppo-v3-')
         if folder is None:
             raise SystemExit('No GitHub checkpoint yet. Train first, or use --local.')
         model_path, config_path = folder/'model.zip', folder/'config.json'
-    model, env, obs = load_session(model_path, config_path, args.seed)
+    model, env, obs = load_session(model_path, config_path, args.seed, args.practice)
     if args.headless:
         for _ in range(args.headless):
             action, _ = model.predict(obs, deterministic=True)
@@ -50,6 +51,7 @@ def main():
         tk.Label(frame, text=title).pack()
         canvas = tk.Canvas(frame, width=extent, height=extent); canvas.pack(); canvases.append(canvas)
     status = tk.StringVar(); tk.Label(root, textvariable=status).pack()
+    tk.Label(root, text='충전 귀환 연습 상황' if args.practice else '일반 탈출 · 시작점 출발').pack()
     running = False; finished = False; seed = args.seed
     delay = tk.IntVar(value=100)
     stochastic = tk.BooleanVar(value=False)
@@ -72,7 +74,9 @@ def main():
             dx,dy = DIRECTIONS[robot.direction]
             canvas.create_oval(cx-cell*.4,cy-cell*.4,cx+cell*.4,cy+cell*.4,fill='#e74646')
             canvas.create_line(cx,cy,cx+dx*cell*.6,cy+dy*cell*.6,fill='#275ddb',width=2)
-        status.set(f'시드 {seed} | 턴 {robot.turns} | 배터리 {robot.battery:g}/{robot.capacity:g} | 충전 {robot.charges} | {robot.reason or "진행 중"}')
+        range_info = f' | 전방 직선 {robot.forward_range}칸' if hasattr(robot, 'forward_range') else ''
+        scenario_info = f' | {env.scenario}' if hasattr(env, 'scenario') else ''
+        status.set(f'시드 {seed} | 턴 {robot.turns} | 배터리 {robot.battery:g}/{robot.capacity:g} | 충전 {robot.charges} | {robot.reason or "진행 중"}' + range_info + scenario_info)
     def step():
         nonlocal obs, finished, running
         if finished: return

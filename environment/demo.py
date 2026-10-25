@@ -1,7 +1,8 @@
 """Manual desktop viewer, not a trained AI. No external Python packages needed."""
 import argparse
 import json
-from .robot import RobotEnv,Config,FORWARD,LEFT,RIGHT,CHARGE,UNKNOWN
+from .robot import Config,FORWARD,LEFT,RIGHT,CHARGE,UNKNOWN
+from .robot_v3 import RangeRobotEnv as RobotEnv
 
 
 def main():
@@ -9,12 +10,11 @@ def main():
     parser.add_argument('--size',type=int,default=64)
     parser.add_argument('--seed',type=int,default=42)
     parser.add_argument('--algorithm',choices=['dfs','prim'],default='dfs')
-    parser.add_argument('--view-distance',type=int,default=5)
     parser.add_argument('--battery-margin',type=float,default=1.25)
-    parser.add_argument('--charge-turns',type=int,default=5)
+    parser.add_argument('--charge-turns',type=int,default=2)
     parser.add_argument('--headless',action='store_true',help='Run deterministic smoke check, not learning')
     args=parser.parse_args()
-    env=RobotEnv(Config(size=args.size,algorithm=args.algorithm,view_distance=args.view_distance,
+    env=RobotEnv(Config(size=args.size,algorithm=args.algorithm,view_distance=3,
                         battery_margin=args.battery_margin,charge_turns=args.charge_turns))
     env.reset(args.seed)
     if args.headless:
