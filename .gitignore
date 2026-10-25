@@ -18,3 +18,5 @@ ppo_test_model.json
 ppo_v2_model.json
 
 ppo_v3_model.json
+
+ppo*_model_summary.txt

@@ -52,12 +52,19 @@ def sync_pending(root=Path('runs')):
             tag = json.loads((bundle.parent.parent / 'config.json').read_text())['cloud_tag']
             publish(bundle, tag)
             print('Uploaded backup:', bundle, flush=True)
+    for pending in sorted(root.rglob('*.evaluation-pending.json')):
+        record=json.loads(pending.read_text(encoding='utf-8'))
+        bundle=pending.parent / record['bundle']
+        if not bundle.with_suffix('.uploaded').exists():
+            publish(bundle,record['tag'])
+            print('Uploaded evaluation:',bundle,flush=True)
+
 
 
 def extract_bundle(bundle, destination):
     with ZipFile(bundle) as z:
         names = set(z.namelist())
-        allowed = {'model.zip', 'config.json', 'metrics.json', 'episodes.csv'}
+        allowed = {'model.zip', 'config.json', 'metrics.json', 'episodes.csv', 'training_summary.txt', 'training_history.csv'}
         if not {'model.zip', 'config.json'} <= names or not names <= allowed or z.testzip():
             raise ValueError('Invalid checkpoint bundle')
         destination.mkdir(parents=True, exist_ok=True)
@@ -94,7 +101,7 @@ def make_bundle(output, step):
         return path
     temp = path.with_suffix('.tmp')
     with ZipFile(temp, 'w', compression=ZIP_DEFLATED) as z:
-        for name in ('model.zip', 'config.json', 'metrics.json', 'episodes.csv'):
+        for name in ('model.zip', 'config.json', 'metrics.json', 'episodes.csv', 'training_summary.txt', 'training_history.csv'):
             if (output / name).exists():
                 z.write(output / name, name)
     temp.replace(path)

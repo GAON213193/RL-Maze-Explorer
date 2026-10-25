@@ -1,6 +1,11 @@
 """Fixed-seed evaluation, separate from training. No weight updates."""
 import argparse
 import json
+import hashlib
+from datetime import datetime, timezone
+from zipfile import ZipFile, ZIP_DEFLATED
+from .reports import evaluation_report
+from .cloud import check_access, download_latest, publish
 from pathlib import Path
 from collections import Counter
 import torch
@@ -37,13 +42,18 @@ def evaluate(model, env, episodes=30, seed=10000, deterministic=True):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--run',type=Path,required=True)
+    p.add_argument('--run',type=Path)
+    p.add_argument('--cloud',action='store_true',help='Download latest v3 if run is omitted and upload evaluation reports')
     p.add_argument('--episodes',type=int,default=30)
     p.add_argument('--seed',type=int,default=10000)
     p.add_argument('--output',type=Path)
     p.add_argument('--practice', action='store_true', help='Evaluate return-practice starts separately')
     p.add_argument('--untrained',action='store_true')
     args=p.parse_args()
+    if args.cloud:
+        check_access()
+        if args.run is None: args.run=download_latest(prefix='ppo-v3-')
+    if args.run is None: p.error('Specify --run or provide an available GitHub v3 checkpoint with --cloud')
     if args.episodes < 1: p.error('episodes must be positive')
     torch.set_num_threads(1)
     config=json.loads((args.run/'config.json').read_text())
@@ -53,7 +63,28 @@ def main():
            PPO.load(args.run/'model.zip',env=env,device='cpu'))
     result=[evaluate(model,env,args.episodes,args.seed,d) for d in (True,False)]
     print(json.dumps(result,indent=2))
-    if args.output: args.output.write_text(json.dumps(result,indent=2))
+    stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    output=args.output or args.run/'evaluations'/('evaluation-'+stamp+'.json')
+    metadata=dict(total_steps=model.num_timesteps,profile=config.get('profile','legacy-v1'),
+                  scenario='return_practice' if args.practice else 'navigation',
+                  model_sha256=hashlib.sha256((args.run/'model.zip').read_bytes()).hexdigest() if not args.untrained else 'untrained-baseline',
+                  source_run=str(args.run),source_release=config.get('cloud_tag'),created_at_utc=stamp,
+                  environment=config['environment'],untrained=args.untrained)
+    files=evaluation_report(output,result,metadata)
+    print('Evaluation saved:',output.with_suffix('.txt').resolve())
+    if args.cloud:
+        tag=config.get('cloud_tag')
+        if not tag: raise SystemExit('Evaluation saved locally; this run has no GitHub release tag.')
+        bundle=output.parent/('evaluation-'+stamp+'.zip')
+        with ZipFile(bundle,'w',compression=ZIP_DEFLATED) as z:
+            for file in files:z.write(file,file.name)
+        pending=bundle.with_suffix('.evaluation-pending.json')
+        pending.write_text(json.dumps(dict(tag=tag,bundle=bundle.name)),encoding='utf-8')
+        try:
+            publish(bundle,tag)
+            print('GitHub evaluation saved:',tag,bundle.name)
+        except RuntimeError as exc:
+            raise SystemExit('Evaluation saved locally; upload failed. Run sync_ppo.bat to retry. '+str(exc))
     env.close()
 
 if __name__=='__main__':main()

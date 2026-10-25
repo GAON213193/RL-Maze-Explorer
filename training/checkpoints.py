@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 from stable_baselines3.common.callbacks import BaseCallback
 from .cloud import make_bundle, publish
+from .reports import training_report
 
 
 def atomic_copy(source, destination):
@@ -84,8 +85,10 @@ class Checkpoints(BaseCallback):
                        success_rate=self.successes/self.episodes if self.episodes else None,
                        recent_100_success_rate=sum(self.recent)/len(self.recent) if self.recent else None)
         (self.output / 'metrics.json').write_text(json.dumps(metrics, indent=2))
+        training_report(self.output, metrics)
         if self.model_path:
             atomic_copy(self.output / 'model.zip', self.model_path)
+            atomic_copy(self.output / 'training_summary.txt', Path(self.model_path).with_name(Path(self.model_path).stem+'_summary.txt'))
             atomic_copy(self.output / 'config.json', Path(self.model_path).with_suffix('.json'))
         self.last_save = self.model.num_timesteps
         print('Local backup saved:', self.last_save, metrics, flush=True)
