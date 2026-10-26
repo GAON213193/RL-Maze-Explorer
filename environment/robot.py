@@ -20,6 +20,7 @@ class Config:
     view_distance: int = 5
     battery_margin: float = 1.25
     charge_turns: int = 5
+    charge_threshold: float = 1.0  # Legacy configs retain their original charging rule.
     max_turns: int = 20000
     collision_cost: float = 1.0
     step_penalty: float = -0.01
@@ -33,6 +34,8 @@ class Config:
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(name + ' must be a positive integer')
+        if not math.isfinite(self.charge_threshold) or not 0 <= self.charge_threshold <= 1:
+            raise ValueError('charge_threshold must be between 0 and 1')
         if self.size < 5 or self.algorithm not in ('dfs', 'prim'):
             raise ValueError('invalid size or algorithm')
         if not math.isfinite(self.battery_margin) or self.battery_margin < 1:
@@ -170,14 +173,14 @@ class RobotEnv:
         if isinstance(action,bool) or not isinstance(action,int) or action not in range(4):
             raise ValueError('action must be 0,1,2,3')
         self.last_collision=False;duration=1;reward=self.config.step_penalty
-        if action==CHARGE and self.position==self.maze.start and self.energy_units<self.capacity_units:
+        if action==CHARGE and self.position==self.maze.start and self.energy_units<self.capacity_units and self.energy_units<=self.capacity_units*self.config.charge_threshold:
             # Atomic full charge; cannot finish if the episode time runs out first.
             duration=min(self.config.charge_turns,self.config.max_turns-self.turns)
             reward=self.config.step_penalty*duration
             if duration==self.config.charge_turns:
                 self.energy_units=self.capacity_units;self.charges+=1
         elif action==CHARGE:
-            # No charging away from station; rejected attempt still costs one turn.
+            # Outside station or above charge threshold; rejected attempt still costs one turn.
             reward+=self.config.collision_penalty
         else:
             dx,dy=DIRECTIONS[self.direction];x,y=self.position

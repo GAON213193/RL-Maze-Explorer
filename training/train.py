@@ -13,6 +13,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from .profiles import make_env
+from .policy import ChargeMaskedPolicy
 from environment.gym_v3 import PROFILE
 from dataclasses import replace
 from environment.robot import Config
@@ -54,8 +55,8 @@ def main():
         p.error('Earlier checkpoints are archived and cannot resume under v3 observations. Start a new model.')
     size = args.size or (saved['environment']['size'] if saved else 64)
     max_turns = args.max_turns or (saved['environment']['max_turns'] if saved and args.size is None else max(196, 4*size*size))
-    config = (replace(Config(**saved['environment']), size=size, max_turns=max_turns, charge_turns=2) if saved else
-              Config(size=size, algorithm=args.algorithm, max_turns=max_turns, charge_turns=2))
+    config = (replace(Config(**saved['environment']), size=size, max_turns=max_turns, charge_turns=2, charge_threshold=0.5) if saved else
+              Config(size=size, algorithm=args.algorithm, max_turns=max_turns, charge_turns=2, charge_threshold=0.5))
     output = args.output or Path('runs') / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     output.mkdir(parents=True, exist_ok=False)
     lesson_probability = args.lesson_probability if args.lesson_probability is not None else (saved.get('lesson_probability', 0.3) if saved else 0.3)
@@ -64,14 +65,14 @@ def main():
     env = make_env(config, PROFILE, lesson_probability)
     check_env(env, warn=True)
     env = Monitor(env, str(output / 'monitor.csv'), info_keywords=('is_success', 'turns'))
-    model = (PPO.load(args.resume / 'model.zip', env=env, device=args.device)
-             if args.resume else PPO('MultiInputPolicy', env, n_steps=128, batch_size=64,
+    model = (PPO.load(args.resume / 'model.zip', env=env, device=args.device, custom_objects={'policy_class': ChargeMaskedPolicy})
+             if args.resume else PPO(ChargeMaskedPolicy, env, n_steps=128, batch_size=64,
                                      n_epochs=4, learning_rate=3e-4, ent_coef=0.02,
                                      policy_kwargs=dict(net_arch=dict(pi=[128, 128], vf=[128, 128])),
                                      seed=args.seed, device=args.device, verbose=1))
     cloud_tag = 'ppo-v3-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
     (output / 'config.json').write_text(json.dumps({'environment': asdict(config),
-        'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
+        'action_rule': 'charge-mask-at-most-50-v1', 'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
     callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)
     start_steps = model.num_timesteps

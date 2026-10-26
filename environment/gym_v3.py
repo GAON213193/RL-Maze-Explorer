@@ -43,7 +43,7 @@ def energy_route(maze, position, direction, target):
 
 class RangeChargeEnv(ExplorationEnv):
     def __init__(self, config=None, lesson_probability=0.3):
-        config = config or Config(size=64, charge_turns=2)
+        config = config or Config(size=64, charge_turns=2, charge_threshold=0.5)
         if config.charge_turns != 2:
             raise ValueError('v3 requires charge_turns=2')
         if not 0 <= lesson_probability <= 1:

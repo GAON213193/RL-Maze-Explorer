@@ -50,6 +50,27 @@ class V3Tests(unittest.TestCase):
         self.assertEqual(info['charges'],1)
         self.assertLessEqual(reward,0)  # no charge farming reward
 
+    def test_charge_threshold_boundaries_and_location(self):
+        for units, allowed in [(11,False),(10,True),(9,True)]:
+            with self.subTest(units=units):
+                env=RangeChargeEnv(Config(size=7,charge_turns=2,charge_threshold=0.5),0)
+                env.reset(seed=8)
+                env.robot.capacity_units=20
+                env.robot.energy_units=units
+                _,_,_,_,info=env.step(CHARGE)
+                self.assertEqual(env.robot.energy_units,20 if allowed else units)
+                self.assertEqual(info['charge_completed'],allowed)
+                self.assertEqual(info['charges'],int(allowed))
+                self.assertEqual(env.robot.turns,2 if allowed else 1)
+        env.reset(seed=8)
+        env.robot.position=next((x,y) for y,row in enumerate(env.robot.maze.grid)
+                                for x,v in enumerate(row) if v==0 and (x,y) not in
+                                (env.robot.maze.start,env.robot.maze.goal))
+        env.robot.energy_units=1
+        _,_,_,_,info=env.step(CHARGE)
+        self.assertFalse(info['charge_completed'])
+        self.assertEqual(env.robot.energy_units,1)
+
     def test_64_defaults_and_valid_observation(self):
         env=RangeChargeEnv()
         self.assertEqual(env.config.size,64)
