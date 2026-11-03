@@ -63,7 +63,7 @@ exit /b 0
 :missing_python
 echo.
 echo Python 3.12 was not found.
-echo Install 64-bit Python 3.12 with Python Launcher from python.org,
+echo Run setup_windows.bat to install Python and the required tools,
 echo then double-click this file again.
 goto failed
 

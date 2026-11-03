@@ -1,12 +1,13 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist "%~dp0.tools\gh\bin\gh.exe" set "PATH=%~dp0.tools\gh\bin;%PATH%"
 if not exist ".venv\Scripts\python.exe" goto setup
 ".venv\Scripts\python.exe" -c "import torch, stable_baselines3, gymnasium" >nul 2>&1
 if errorlevel 1 goto setup
 where gh >nul 2>&1
 if errorlevel 1 (
- echo Install GitHub CLI from https://cli.github.com and reopen this file.
+ echo Run setup_windows.bat to prepare GitHub CLI, then reopen this file.
  pause
  exit /b 1
 )
@@ -45,6 +46,6 @@ if errorlevel 1 echo FAILED: See the error above. Local backups are retained.
 pause
 exit /b
 :setup
-echo Run test_ppo.bat first to install and verify the Python environment.
+echo Run setup_windows.bat first to install and verify the Python environment.
 pause
 exit /b 1
