@@ -73,7 +73,7 @@ def main():
                                      seed=args.seed, device=args.device, verbose=1))
     cloud_tag = 'ppo-v3-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
     (output / 'config.json').write_text(json.dumps({'environment': asdict(config),
-        'reward_rule': 'rolling-heading-penalty-v2',
+        'reward_rule': 'rolling-heading-penalty-v2-practice-charge-v1',
         'action_rule': 'charge-mask-at-most-50-v1', 'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
     callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)

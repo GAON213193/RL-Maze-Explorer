@@ -152,7 +152,8 @@ class RangeChargeEnv(ExplorationEnv):
             if not at_station: self.left_station = True
         if charged and self.returned:
             self.charged_after_return = True
-        # No direct bonus for returning or charging: success must follow.
+            if self.scenario == 'return_practice' and charged_before == 0:
+                reward += 0.5
         info.update(scenario=self.scenario, charges=self.robot.charges,
                     returned_to_station=self.returned,
                     charged_after_return=self.charged_after_return,

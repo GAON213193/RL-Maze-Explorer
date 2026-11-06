@@ -96,8 +96,14 @@ class V3Tests(unittest.TestCase):
             for a in route: obs,_,t,tr,info=env.step(a)
             self.assertFalse(t or tr)
             self.assertTrue(info['returned_to_station'])
-            obs,_,t,tr,info=env.step(CHARGE)
+            obs,reward,t,tr,info=env.step(CHARGE)
             self.assertTrue(info['charged_after_return'])
+            self.assertAlmostEqual(reward, 0.5 - 0.002 * 2)
+            # Simulate returning low on energy a second time in the same episode.
+            robot.energy_units = robot.capacity_units // 2
+            obs,reward,t,tr,info=env.step(CHARGE)
+            self.assertEqual(info['charges'], 2)
+            self.assertAlmostEqual(reward, -0.002 * 2)
             _,escape=energy_route(robot.maze,robot.position,robot.direction,robot.maze.goal)
             for a in escape: obs,_,t,tr,info=env.step(a)
             self.assertTrue(info['is_success'])
