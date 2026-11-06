@@ -3,6 +3,7 @@
 Lesson generation may use evaluator paths to construct a solvable situation.
 These paths and the lesson label are NEVER part of policy observations.
 """
+from collections import deque
 import heapq
 import math
 import numpy as np
@@ -12,6 +13,7 @@ from .robot_v3 import RangeRobotEnv
 from .robot import Config, DIRECTIONS, FORWARD, LEFT, RIGHT, CHARGE
 
 PROFILE = 'range-charge-v3'
+REVISIT_WINDOW = 64
 
 
 def energy_route(maze, position, direction, target):
@@ -57,7 +59,7 @@ class RangeChargeEnv(ExplorationEnv):
         self.charged_after_return = False
         self.left_station = False
         self.moves_after_charge = 0
-        self.revisits_without_progress = {}
+        self.recent_headings = deque(maxlen=REVISIT_WINDOW)
 
     def _encode(self, obs):
         encoded = super()._encode(obs)
@@ -80,7 +82,7 @@ class RangeChargeEnv(ExplorationEnv):
         self.returned = False
         self.charged_after_return = False
         self.moves_after_charge = 0
-        self.revisits_without_progress = {}
+        self.recent_headings.clear()
         return self._encode(self.robot.observation()), {'scenario': self.scenario}
 
     def _prepare_return(self):
@@ -133,19 +135,15 @@ class RangeChargeEnv(ExplorationEnv):
 
     def step(self, action):
         before = self.robot.position
-        known_cells = len(self.visited)
         charged_before = self.robot.charges
         obs,reward,terminated,truncated,info = super().step(action)
-        # Allow normal backtracking. Penalize repeatedly reaching the same
-        # position and heading without visiting a new cell in between.
+        # Recent repeats remain visible even when a new cell is discovered.
+        # Old visits expire so occasional returns need not incur a penalty.
         charged = self.robot.charges > charged_before
-        if len(self.visited) > known_cells:
-            self.revisits_without_progress.clear()
         if not charged and not (terminated or truncated):
             state = self.robot.position, self.robot.direction
-            visits = self.revisits_without_progress.get(state, 0) + 1
-            self.revisits_without_progress[state] = visits
-            if visits >= 4:
+            self.recent_headings.append(state)
+            if self.recent_headings.count(state) >= 4:
                 reward -= 0.02
         at_station = self.robot.position == self.robot.maze.start
         if self.robot.position != before:
