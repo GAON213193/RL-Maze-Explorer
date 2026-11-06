@@ -55,6 +55,7 @@ def main():
         p.error('Earlier checkpoints are archived and cannot resume under v3 observations. Start a new model.')
     size = args.size or (saved['environment']['size'] if saved else 64)
     max_turns = args.max_turns or (saved['environment']['max_turns'] if saved and args.size is None else max(196, 4*size*size))
+    print(f'Training maze: {size}x{size}; checkpoint: {args.resume or "new model"}')
     config = (replace(Config(**saved['environment']), size=size, max_turns=max_turns, charge_turns=2, charge_threshold=0.5) if saved else
               Config(size=size, algorithm=args.algorithm, max_turns=max_turns, charge_turns=2, charge_threshold=0.5))
     output = args.output or Path('runs') / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
@@ -72,6 +73,7 @@ def main():
                                      seed=args.seed, device=args.device, verbose=1))
     cloud_tag = 'ppo-v3-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8] if args.cloud else None
     (output / 'config.json').write_text(json.dumps({'environment': asdict(config),
+        'reward_rule': 'repeated-heading-penalty-v1',
         'action_rule': 'charge-mask-at-most-50-v1', 'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
     callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)

@@ -57,6 +57,7 @@ class RangeChargeEnv(ExplorationEnv):
         self.charged_after_return = False
         self.left_station = False
         self.moves_after_charge = 0
+        self.revisits_without_progress = {}
 
     def _encode(self, obs):
         encoded = super()._encode(obs)
@@ -79,6 +80,7 @@ class RangeChargeEnv(ExplorationEnv):
         self.returned = False
         self.charged_after_return = False
         self.moves_after_charge = 0
+        self.revisits_without_progress = {}
         return self._encode(self.robot.observation()), {'scenario': self.scenario}
 
     def _prepare_return(self):
@@ -131,14 +133,26 @@ class RangeChargeEnv(ExplorationEnv):
 
     def step(self, action):
         before = self.robot.position
+        known_cells = len(self.visited)
         charged_before = self.robot.charges
         obs,reward,terminated,truncated,info = super().step(action)
+        # Allow normal backtracking. Penalize repeatedly reaching the same
+        # position and heading without visiting a new cell in between.
+        charged = self.robot.charges > charged_before
+        if len(self.visited) > known_cells:
+            self.revisits_without_progress.clear()
+        if not charged and not (terminated or truncated):
+            state = self.robot.position, self.robot.direction
+            visits = self.revisits_without_progress.get(state, 0) + 1
+            self.revisits_without_progress[state] = visits
+            if visits >= 4:
+                reward -= 0.02
         at_station = self.robot.position == self.robot.maze.start
         if self.robot.position != before:
             if self.robot.charges > 0: self.moves_after_charge += 1
             if at_station and self.left_station: self.returned = True
             if not at_station: self.left_station = True
-        if self.robot.charges > charged_before and self.returned:
+        if charged and self.returned:
             self.charged_after_return = True
         # No direct bonus for returning or charging: success must follow.
         info.update(scenario=self.scenario, charges=self.robot.charges,
@@ -146,5 +160,5 @@ class RangeChargeEnv(ExplorationEnv):
                     charged_after_return=self.charged_after_return,
                     success_after_charge=info['is_success'] and self.robot.charges > 0,
                     moves_after_charge=self.moves_after_charge,
-                    charge_completed=self.robot.charges > charged_before)
+                    charge_completed=charged)
         return obs,reward,terminated,truncated,info
