@@ -9,7 +9,7 @@ import tempfile
 from zipfile import ZipFile, ZIP_DEFLATED
 
 REPO = 'GAON213193/RL-Maze-Explorer'
-BRANCH = 'codex/robot-environment-foundation'
+BRANCH = 'models'
 PREFIX = 'ppo-run-'
 
 
