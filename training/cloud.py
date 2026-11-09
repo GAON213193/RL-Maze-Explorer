@@ -1,5 +1,7 @@
 """Immutable GitHub Release checkpoint bundles; local files are backups."""
 import argparse
+import base64
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -9,7 +11,8 @@ import tempfile
 from zipfile import ZipFile, ZIP_DEFLATED
 
 REPO = 'GAON213193/RL-Maze-Explorer'
-BRANCH = 'codex/robot-environment-foundation'
+BRANCH = 'codex/browser-training-launcher'
+MODEL_BRANCH = 'models'
 PREFIX = 'ppo-run-'
 
 
@@ -44,11 +47,74 @@ def publish(bundle, tag):
     elif not any(a['name'] == bundle.name for a in release['assets']):
         gh('release', 'upload', tag, str(bundle), '--repo', REPO)
     bundle.with_suffix('.uploaded').write_text(tag, encoding='utf-8')
+    if re.fullmatch(r'checkpoint-\d+\.zip', bundle.name):
+        index_checkpoint(bundle, tag)
+        bundle.with_suffix('.indexed').write_text(tag, encoding='utf-8')
+
+
+def api_json(endpoint, payload, method='POST'):
+    with tempfile.TemporaryDirectory(prefix='ppo-api-') as folder:
+        request = Path(folder) / 'request.json'
+        request.write_text(json.dumps(payload), encoding='utf-8')
+        return json.loads(gh('api', endpoint, '--method', method, '--input', str(request)))
+
+
+def index_checkpoint(bundle, tag):
+    """Atomically update the model-only branch without moving code or Release tags."""
+    if not re.fullmatch(r'ppo-(?:v\d+|run)-[A-Za-z0-9-]+', tag):
+        raise ValueError('Invalid model run tag')
+    step = int(bundle.stem.removeprefix('checkpoint-'))
+    with tempfile.TemporaryDirectory(prefix='ppo-index-') as folder:
+        restored = Path(folder) / 'checkpoint'
+        extract_bundle(bundle, restored)
+        files = {p.name: p.read_bytes() for p in restored.iterdir()}
+    endpoint = f'repos/{REPO}'
+    head = json.loads(gh('api', f'{endpoint}/git/ref/heads/{MODEL_BRANCH}'))['object']['sha']
+    commit = json.loads(gh('api', f'{endpoint}/git/commits/{head}'))
+    tree = json.loads(gh('api', f'{endpoint}/git/trees/{commit["tree"]["sha"]}'))
+    entries = {entry['path']: entry for entry in tree['tree']}
+
+    def read_json(name, default):
+        if name not in entries:
+            return default
+        blob = json.loads(gh('api', f'{endpoint}/git/blobs/{entries[name]["sha"]}'))
+        return json.loads(base64.b64decode(blob['content']))
+
+    manifest = read_json('manifest.json', {'runs': []})
+    previous = next((r for r in manifest['runs'] if r['run'] == tag), None)
+    if previous and previous['checkpoint_steps'] >= step:
+        return
+    record = dict(run=tag, checkpoint_steps=step,
+                  source_release=f'https://github.com/{REPO}/releases/tag/{tag}',
+                  files_sha256={name: hashlib.sha256(data).hexdigest() for name, data in files.items()})
+    manifest['runs'] = [r for r in manifest['runs'] if r['run'] != tag] + [record]
+    changes = []
+    for name, data in files.items():
+        blob = api_json(f'{endpoint}/git/blobs',
+                        {'content': base64.b64encode(data).decode('ascii'), 'encoding': 'base64'})
+        changes.append(dict(path=f'checkpoints/{tag}/{name}', mode='100644', type='blob', sha=blob['sha']))
+    changes.append(dict(path='manifest.json', mode='100644', type='blob',
+                        content=json.dumps(manifest, indent=2)))
+    latest = read_json('latest.json', {})
+    # Timestamp is embedded in the run tag, independent of the profile prefix.
+    def run_time(run):
+        match = re.search(r'(\d{8}-\d{6})', run)
+        return match.group(1) if match else ''
+    if run_time(tag) >= run_time(latest.get('run', '')):
+        changes.append(dict(path='latest.json', mode='100644', type='blob', content=json.dumps(
+            dict(run=tag, total_steps=step, path=f'checkpoints/{tag}',
+                 source_release=record['source_release']), indent=2)))
+    updated_tree = api_json(f'{endpoint}/git/trees', {'base_tree': commit['tree']['sha'], 'tree': changes})
+    updated_commit = api_json(f'{endpoint}/git/commits',
+        {'message': f'Index {tag} at {step} steps', 'tree': updated_tree['sha'], 'parents': [head]})
+    # GitHub rejects a concurrent non-fast-forward update; sync retries from the new head.
+    api_json(f'{endpoint}/git/refs/heads/{MODEL_BRANCH}',
+             {'sha': updated_commit['sha'], 'force': False}, method='PATCH')
 
 
 def sync_pending(root=Path('runs')):
     for bundle in sorted(root.glob('*/cloud/checkpoint-*.zip')):
-        if not bundle.with_suffix('.uploaded').exists():
+        if not bundle.with_suffix('.uploaded').exists() or not bundle.with_suffix('.indexed').exists():
             tag = json.loads((bundle.parent.parent / 'config.json').read_text())['cloud_tag']
             publish(bundle, tag)
             print('Uploaded backup:', bundle, flush=True)
@@ -115,3 +181,4 @@ if __name__ == '__main__':
     check_access()
     sync_pending()
     print('All pending backups uploaded.')
+

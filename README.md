@@ -1,5 +1,10 @@
 # RL-Maze-Explorer
 
+## 코드와 모델 저장 위치
+
+실행 코드·EXE는 `codex/browser-training-launcher`에서 받습니다. 학습된 모델과 기록은 [models 브랜치](https://github.com/GAON213193/RL-Maze-Explorer/tree/models)에서 확인합니다.
+GitHub 저장을 켜면 체크포인트 이력은 Releases에 보관하고 각 실행의 최신 모델·설정·통계·CSV·TXT를 models에 자동 반영합니다. 업로드 실패 시 로컬 파일을 유지하며 `sync_ppo.bat`로 재시도합니다. 기존에 받은 폴더는 최신 코드로 갱신해야 이 동작이 적용됩니다.
+
 ## BAT 없이 브라우저에서 로컬 학습
 
 이 브랜치에서 **Code → Download ZIP**으로 전체 파일을 받은 뒤 압축을 모두 풀고 `RL-Maze-Explorer.exe`를 실행하세요. `runtime` 폴더와 `.tools` 폴더를 함께 보관해야 합니다.
