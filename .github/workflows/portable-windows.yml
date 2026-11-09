@@ -1,0 +1,32 @@
+name: Add portable Windows runtime
+on:
+  push:
+    branches: [codex/browser-training-launcher]
+    paths: [.github/workflows/portable-windows.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig compiler
+        run: |
+          curl --fail --location --retry 3 https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o /tmp/zig.tar.xz
+          tar -xf /tmp/zig.tar.xz -C /tmp
+      - name: Build portable Windows files
+        run: python3 scripts/build_portable.py --output /tmp/portable --zig /tmp/zig-x86_64-linux-0.14.1/zig
+      - name: Add executable and dependencies to this branch
+        run: |
+          cp /tmp/portable/RL-Maze-Explorer-Web/RL-Maze-Explorer.exe .
+          cp /tmp/portable/RL-Maze-Explorer-Web/runtime-sources.json .
+          cp -a /tmp/portable/RL-Maze-Explorer-Web/runtime .
+          mkdir -p .tools
+          cp -a /tmp/portable/RL-Maze-Explorer-Web/.tools/gh .tools/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f RL-Maze-Explorer.exe runtime-sources.json runtime .tools/gh
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Include Windows executable, Python runtime and GitHub CLI"
+          git push origin HEAD:codex/browser-training-launcher
