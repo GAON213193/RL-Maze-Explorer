@@ -1,0 +1,38 @@
+{
+  "total_steps": 100096,
+  "episodes": 1810,
+  "stalls": 12,
+  "action_counts": [
+    69241,
+    16374,
+    14187,
+    294
+  ],
+  "scenarios": {
+    "navigation": {
+      "episodes": 1273,
+      "successes": 76,
+      "returns": 141,
+      "episodes_with_charge": 90,
+      "charged_after_return": 90,
+      "success_after_charge": 2,
+      "charges": 281
+    },
+    "return_practice": {
+      "episodes": 537,
+      "successes": 0,
+      "returns": 5,
+      "episodes_with_charge": 5,
+      "charged_after_return": 5,
+      "success_after_charge": 0,
+      "charges": 9
+    }
+  },
+  "mean_unique_cells": 23.35303867403315,
+  "mean_forward_moves": 35.86961325966851,
+  "successes": 76,
+  "battery_depletions": 1714,
+  "mean_turns": 55.277348066298345,
+  "success_rate": 0.041988950276243095,
+  "recent_100_success_rate": 0.07
+}

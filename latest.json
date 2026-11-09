@@ -1,0 +1,6 @@
+{
+  "run": "ppo-v3-20261109-150405-9f7b2042",
+  "total_steps": 200192,
+  "path": "checkpoints/ppo-v3-20261109-150405-9f7b2042",
+  "source_release": "https://github.com/GAON213193/RL-Maze-Explorer/releases/tag/ppo-v3-20261109-150405-9f7b2042"
+}

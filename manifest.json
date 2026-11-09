@@ -1,0 +1,30 @@
+{
+  "runs": [
+    {
+      "run": "ppo-v3-20261109-144234-dffa553a",
+      "checkpoint_steps": 100096,
+      "source_release": "https://github.com/GAON213193/RL-Maze-Explorer/releases/tag/ppo-v3-20261109-144234-dffa553a",
+      "files_sha256": {
+        "training_history.csv": "79063c50c21288580235492142ccc2156a1005d4d08c35714326c6d7e03dc1ef",
+        "config.json": "1fd5c0a7be558bc336416ce24177c67d01471f45b9e63833ce12987a9ed86bab",
+        "training_summary.txt": "fe8e5b7c58e56df5ea3d4e0700c84073bc5662d98e9fdd47d5536018e1801ba9",
+        "model.zip": "02083af595290a73959978a43d3543810cdb6084afaa27a6059c867d6d29b90e",
+        "metrics.json": "0ad714d3084d2a87818893ad94770eb4063fcd3b1fb7e04fbe2693ca9f308a97",
+        "episodes.csv": "1fd8112d9db53c19545d9d9ed36601c044ad8986b3f5947d4109b93d44063b68"
+      }
+    },
+    {
+      "run": "ppo-v3-20261109-150405-9f7b2042",
+      "checkpoint_steps": 200192,
+      "source_release": "https://github.com/GAON213193/RL-Maze-Explorer/releases/tag/ppo-v3-20261109-150405-9f7b2042",
+      "files_sha256": {
+        "training_history.csv": "15e0e1940c67fa3480a92c70aeb9162fa6ab1baa9c2194e7399e6fd68a76634b",
+        "config.json": "6bdc0f03d44888712a003734195e55196602db2bca0b209b11d54382c4c2eada",
+        "training_summary.txt": "5cae02595d62d0d20ad2eb621f48e765bb612aaee9b9db970483fe327fbd6452",
+        "model.zip": "f37f02625b9f6fa30bde32d2ddd228b0fd5d43576aae41f642f44d29d25d41e2",
+        "metrics.json": "8fc54973326c119d90c5d4bd9b3b2acb9c0462675fc53474640fa53f1d747a08",
+        "episodes.csv": "c0e5b0566a6495f747b55479231ebeab00ba87ac0eb068be610994c5890d8fc0"
+      }
+    }
+  ]
+}
