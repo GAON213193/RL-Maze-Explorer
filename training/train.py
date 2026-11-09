@@ -35,6 +35,7 @@ def main():
     p.add_argument('--output', type=Path, default=None)
     p.add_argument('--model-path', type=Path, help='Also copy the saved model here (replaces an existing file)')
     p.add_argument('--resume', type=Path, help='Previous run directory with model.zip and config.json')
+    p.add_argument('--stop-file', type=Path, help='Save and stop when this file exists')
     args = p.parse_args()
     if args.save_every < 1:
         p.error('save-every must be positive')
@@ -76,7 +77,7 @@ def main():
         'reward_rule': 'rolling-heading-penalty-v2-practice-charge-v1',
         'action_rule': 'charge-mask-at-most-50-v1', 'profile': PROFILE, 'lesson_probability': lesson_probability, 'cloud_tag': cloud_tag, 'seed': args.seed, 'requested_steps': args.steps, 'device': str(model.device),
         'resume': str(args.resume) if args.resume else None}, indent=2), encoding='utf-8')
-    callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag)
+    callback = Checkpoints(output, args.save_every, args.model_path, cloud_tag, args.stop_file)
     start_steps = model.num_timesteps
     started = time.perf_counter()
     interrupted = False
@@ -90,7 +91,8 @@ def main():
         env.close()
     elapsed = time.perf_counter() - started
     summary = {'steps_this_run': model.num_timesteps - start_steps,
-               'total_steps': model.num_timesteps, 'seconds': elapsed, 'interrupted': interrupted}
+               'total_steps': model.num_timesteps, 'seconds': elapsed, 'interrupted': interrupted,
+               'stopped_by_request': bool(args.stop_file and args.stop_file.exists())}
     (output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     print('Saved:', output.resolve())

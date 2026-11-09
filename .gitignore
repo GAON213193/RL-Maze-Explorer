@@ -22,6 +22,7 @@ ppo_v3_model.json
 ppo*_model_summary.txt
 
 .tools/
+.launcher/
 .setup-cache/
 .venv-backup-*/
 setup_windows.log

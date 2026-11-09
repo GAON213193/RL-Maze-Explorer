@@ -17,10 +17,11 @@ def atomic_copy(source, destination):
 
 
 class Checkpoints(BaseCallback):
-    def __init__(self, output, interval, model_path=None, cloud_tag=None):
+    def __init__(self, output, interval, model_path=None, cloud_tag=None, stop_file=None):
         super().__init__()
         self.output, self.interval = output, interval
         self.model_path, self.cloud_tag = model_path, cloud_tag
+        self.stop_file = stop_file
         self.last_save = None
         self.last_uploaded = None
         self.episodes = self.successes = self.depletions = self.turns = 0
@@ -65,7 +66,7 @@ class Checkpoints(BaseCallback):
                                            int(success), int(depleted), info.get('unique_cells'), info.get('forward_moves'), scenario, info.get('charges',0),
                                            info.get('returned_to_station',False), info.get('charged_after_return',False),
                                            info.get('success_after_charge',False), info.get('moves_after_charge',0)])
-        return True
+        return self.stop_file is None or not self.stop_file.exists()
 
     def _on_rollout_start(self):
         # This is after the previous update, not midway through rollout collection.

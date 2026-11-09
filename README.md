@@ -1,5 +1,9 @@
 # RL-Maze-Explorer
 
+## BAT 없이 브라우저에서 로컬 학습
+
+Windows용 `RL-Maze-Explorer-Web-Windows.zip` 전체를 풀고 `RL-Maze-Explorer.exe`를 실행하면 브라우저에서 환경 준비, 크기별 새 학습·이어 학습, 모델 저장 후 중지를 사용할 수 있습니다. 계산은 해당 컴퓨터에서 수행합니다. 사용 방법은 [docs/DESKTOP.md](docs/DESKTOP.md)에 있습니다.
+
 현재 기본 학습은 **64×64 v3**입니다. 가까운 3칸의 교차로 정보와 먼 직선 통로 길이를 구분하고, 충전은 2턴입니다.
 기존 v1/v2 모델은 보존하고 새 입력 구조로 학습합니다.
 `ppo_v3_model_summary.txt`로 학습 요약을 확인하고, `evaluate_ppo.bat`로 별도 평가 결과를 저장합니다.
