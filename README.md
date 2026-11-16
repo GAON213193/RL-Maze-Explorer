@@ -5,7 +5,13 @@
 실행 코드·EXE는 `codex/browser-training-launcher`에서 받습니다. 학습된 모델과 기록은 [models 브랜치](https://github.com/GAON213193/RL-Maze-Explorer/tree/models)에서 확인합니다.
 GitHub 저장을 켜면 체크포인트 이력은 Releases에 보관하고 각 실행의 최신 모델·설정·통계·CSV·TXT를 models에 자동 반영합니다. 업로드 실패 시 로컬 파일을 유지하며 `sync_ppo.bat`로 재시도합니다. 기존에 받은 폴더는 최신 코드로 갱신해야 이 동작이 적용됩니다.
 
-## BAT 없이 브라우저에서 로컬 학습
+## HTML로 로컬 학습 (설치 없이 실행)
+
+이 브랜치의 **Code → Download ZIP**을 받아 압축을 푼 뒤 `RL-Maze-Browser-Trainer.html`을 Chrome 또는 Edge에서 여세요. **새 학습**을 누르면 이 PC의 CPU에서 PPO 학습을 시작합니다. 이 HTML은 오프라인에서 실행되며, **모델 다운로드**로 저장한 JSON을 다시 선택해 이어 학습할 수 있습니다.
+
+HTML의 모델 형식은 브라우저용 JSON입니다. 기존 Python 모델 ZIP과 GitHub 모델 자동 저장은 아래 EXE 또는 BAT 실행 방식에서 사용합니다.
+
+## EXE로 브라우저에서 로컬 학습
 
 이 브랜치에서 **Code → Download ZIP**으로 전체 파일을 받은 뒤 압축을 모두 풀고 `RL-Maze-Explorer.exe`를 실행하세요. `runtime` 폴더와 `.tools` 폴더를 함께 보관해야 합니다.
 
