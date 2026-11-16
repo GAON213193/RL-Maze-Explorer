@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RL Maze Explorer 학습</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101923;color:#e9f1f7;font:16px/1.5 system-ui,sans-serif}main{max-width:940px;margin:auto;padding:30px 18px}h1,h2{line-height:1.2}p{color:#b7c9d6}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end}label{display:grid;gap:5px;font-size:14px}input,select,button{font:inherit;color:inherit;border:1px solid #527287;background:#192b38;border-radius:7px;padding:8px;max-width:100%}input[type=number]{width:135px}button{cursor:pointer}button.primary{background:#91e8d0;color:#102323;font-weight:700}button:disabled{opacity:.45;cursor:default}section{background:#17232e;border:1px solid #324658;border-radius:12px;padding:18px;margin:18px 0}.output{display:grid;grid-template-columns:minmax(240px,340px) 1fr;gap:20px}canvas{width:100%;image-rendering:pixelated;background:#0c141c}progress{width:100%;accent-color:#91e8d0}dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px}dd{margin:0;font-variant-numeric:tabular-nums}small{color:#b7c9d6}@media(max-width:620px){.output{grid-template-columns:1fr}}
+</style>
+<main>
+<h1>RL Maze Explorer 학습</h1>
+<p>이 PC의 브라우저에서 v3 미로를 학습합니다. GitHub에서 받은 기존 모델은 ZIP으로, 웹에서 저장한 모델은 JSON으로 열 수 있습니다.</p>
+<section>
+<h2>1. 실행 준비</h2>
+<button id="prepare">학습 환경 준비</button> <span id="ready" role="status">준비 전</span>
+</section>
+<section>
+<h2>2. 학습 설정</h2>
+<div class="controls">
+<label>미로 크기 <select id="size"><option>7</option><option>15</option><option>31</option><option selected>64</option></select></label>
+<label>추가 학습 스텝 <input id="steps" type="number" min="128" max="10000000" value="100000"></label>
+<label>무작위 시드 <input id="seed" type="number" min="0" max="4294967295" value="42"></label>
+<label>귀환 연습 비율 (%) <select id="practice"><option>30</option><option>50</option><option>80</option><option>100</option></select></label>
+</div>
+<div class="controls" style="margin-top:14px">
+<button id="start" class="primary" disabled>새 학습</button><button id="resume" disabled>이어 학습</button><button id="stop" disabled>저장 후 정지</button><button id="save" disabled>모델 다운로드</button>
+<label>모델 불러오기 <input id="file" type="file" accept=".json,.zip,application/json,application/zip"></label>
+</div>
+<p id="status" role="status">대기 중</p><progress id="progress" max="1" value="0" aria-label="학습 진행률"></progress>
+</section>
+<section>
+<h2>3. GitHub 모델</h2>
+<div class="controls">
+<button id="github-list">GitHub 모델 목록</button>
+<label>체크포인트 <select id="github-model"><option value="">모델 목록을 불러오세요</option></select></label>
+<button id="github-load">선택 모델 불러오기</button>
+<button id="github-save" disabled>GitHub에 모델 저장</button>
+</div>
+<div class="controls">
+<label>저장소 쓰기 권한이 있는 GitHub 토큰 <input id="token" type="password" autocomplete="off"></label>
+<label><span><input id="github-auto" type="checkbox"> 학습 완료·중지 시 자동 업로드</span></label>
+</div>
+<p>공개 모델 목록과 다운로드는 토큰 없이 사용할 수 있습니다. 업로드 토큰은 이 탭에서만 사용합니다.</p>
+<p id="github-status" role="status"></p><a id="release-download" hidden>Release 체크포인트 ZIP 다운로드</a>
+</section>
+<section class="output">
+<div><canvas id="map" width="320" height="320" aria-label="로봇과 관측한 미로"></canvas><small>하늘색 로봇 · 노란색 충전소 · 초록색 출구 · 어두운 칸은 미관측</small></div>
+<div><h2>학습 기록</h2><dl><dt>누적 스텝</dt><dd id="total">0</dd><dt>완료 에피소드</dt><dd id="episodes">0</dd><dt>일반 탈출률</dt><dd id="success">—</dd><dt>귀환 연습 충전율</dt><dd id="charge">—</dd><dt>성공 시 평균 턴</dt><dd id="turns">—</dd><dt>배터리 소진</dt><dd id="depleted">0</dd></dl></div>
+</section>
+</main>
+<script id="worker" type="text/plain">
+'use strict';
+const directions = [[0,-1],[1,0],[0,1],[-1,0]];
+const inputs = 583;
+const format = 'rl-maze-browser-v3-2';
+const layers = [];
+let parameterCount = 0;
+function layer(name, input, output) {
+  const entry = {name,input,output,weights:parameterCount,bias:parameterCount+input*output};
+  parameterCount += input*output+output;
+  layers.push(entry);
+  return entry;
+}
+const actor = [layer('mlp_extractor.policy_net.0',inputs,128),
+  layer('mlp_extractor.policy_net.2',128,128),layer('action_net',128,4)];
+const critic = [layer('mlp_extractor.value_net.0',inputs,128),
+  layer('mlp_extractor.value_net.2',128,128),layer('value_net',128,1)];
+const choice = (items, rng) => items[Math.floor(rng.next() * items.length)];
+const pause = () => new Promise(resolve => setTimeout(resolve, 0));
+
+class Random {
+  constructor(seed) { this.state = seed >>> 0; }
+  next() {
+    this.state = (this.state + 0x6d2b79f5) >>> 0;
+    let x = this.state;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  }
+}
+
+class Maze {
+  constructor(size, rng) {
+    this.size = size;
+    const n = size;
+    for (;;) {
+      this.grid = new Int8Array(n*n).fill(1);
+      const stack = [n+1];
+      this.grid[n+1] = 0;
+      while (stack.length) {
+        const cell = stack[stack.length-1], x = cell % n, y = Math.floor(cell/n);
+        const options = directions.map(([dx,dy]) => [x+2*dx,y+2*dy])
+          .filter(([a,b]) => a>0 && b>0 && a<n-1 && b<n-1 && this.grid[b*n+a]);
+        if (!options.length) { stack.pop(); continue; }
+        const [a,b] = choice(options,rng), next = b*n+a;
+        this.grid[next] = this.grid[(cell+next)/2] = 0;
+        stack.push(next);
+      }
+      const edge = [];
+      const last = (n-2)%2 ? n-2 : n-3;
+      for (let k=1;k<=last;k+=2) {
+        edge.push([0,k,k+n],[1,k*n+n-1,k*n+last],[2,(n-1)*n+k,last*n+k],[3,k*n,k*n+1]);
+      }
+      const interior = this.grid;
+      for (let attempt=0;attempt<128;attempt++) {
+        const a=choice(edge,rng), b=choice(edge,rng);
+        if (a[0]===b[0]) continue;
+        this.grid=interior.slice();
+        for (const [,port,inner] of [a,b]) {
+          this.grid[port]=0;
+          if (Math.abs(port-inner)>n || (Math.floor(port/n)===Math.floor(inner/n) && Math.abs(port-inner)>1))
+            this.grid[(port+inner)/2]=0;
+        }
+        const route=this.route(a[1],b[1],(a[0]+2)%4);
+        if (route && route.moves>=n) {
+          this.start=a[1]; this.goal=b[1]; this.inward=(a[0]+2)%4;
+          this.capacity=Math.ceil(route.energy*1.25);
+          return;
+        }
+      }
+    }
+  }
+  offset(cell, dx, dy) {
+    const x=cell%this.size+dx, y=Math.floor(cell/this.size)+dy;
+    return x<0 || y<0 || x>=this.size || y>=this.size ? -1 : y*this.size+x;
+  }
+  next(cell, heading) { return this.offset(cell,...directions[heading]); }
+  open(cell) { return cell>=0 && this.grid[cell]===0; }
+  route(from,to,heading) {
+    const parents=new Int32Array(this.grid.length).fill(-1), queue=[from];
+    parents[from]=from;
+    for(let i=0;i<queue.length && parents[to]<0;i++) {
+      for(let d=0;d<4;d++) {
+        const cell=this.next(queue[i],d);
+        if(this.open(cell) && parents[cell]<0) { parents[cell]=queue[i]; queue.push(cell); }
+      }
+    }
+    if(parents[to]<0) return null;
+    const headings=[];
+    for(let at=to;at!==from;at=parents[at]) {
+      const previous=parents[at];
+      headings.push(directions.findIndex((_,d)=>this.next(previous,d)===at));
+    }
+    let energy=0;
+    for(const d of headings.reverse()) {
+      const turn=(d-heading+4)%4;
+      energy+=2+Math.min(turn,4-turn);
+      heading=d;
+    }
+    return {energy,heading,moves:headings.length};
+  }
+}
+
+class Robot {
+  constructor(size,rng,practiceRate) {
+    this.maze=new Maze(size,rng);
+    this.reset();
+    if(rng.next()>=practiceRate) return;
+    const visited=this.visited; this.lastHeading=this.heading;
+    const moves=2+Math.floor(rng.next()*4);
+    for(let i=0;i<moves;i++){
+      const choices=[0,1,2,3].filter(d=>{
+        const next=this.maze.next(this.cell,d);
+        return this.maze.open(next) && next!==this.maze.goal && !visited.has(next);
+      });
+      if(!choices.length) { this.reset(); return; }
+      this.heading=choice(choices,rng);
+      let rotation=(this.heading-this.lastHeading+4)%4;
+      const direction=rotation===3?3:1;
+      if(rotation===3) rotation=1;
+      for(let j=0;j<rotation;j++){this.lastHeading=(this.lastHeading+direction)%4;this.observe(this.lastHeading);}
+      this.cell=this.maze.next(this.cell,this.heading); visited.add(this.cell); this.observe();
+      this.lastHeading=this.heading;
+    }
+    const back=this.maze.route(this.cell,this.maze.start,this.heading);
+    const out=this.maze.route(this.cell,this.maze.goal,this.heading);
+    const charged=this.maze.route(this.maze.start,this.maze.goal,back.heading);
+    if(back.energy+2<out.energy && back.energy+2<this.maze.capacity && charged.energy<=this.maze.capacity) {
+      this.energy=back.energy+2; this.practice=true; this.leftStation=true;
+    } else this.reset();
+  }
+  reset() {
+    this.cell=this.maze.start; this.heading=this.maze.inward; this.energy=this.maze.capacity;
+    this.memory=new Int8Array(this.maze.grid.length).fill(-1);
+    this.turns=0; this.charges=0; this.collision=false; this.practice=false; this.history=[];
+    this.visited=new Set([this.cell]); this.noMove=0;this.turnStreak=0;
+    this.leftStation=false;this.returned=false;
+    this.observe();
+  }
+  observe(heading=this.heading) {
+    let fresh=0;this.visible=new Set();
+    const [dx,dy]=directions[heading];
+    const reveal=(id,detail)=>{
+      if(id<0) return;
+      this.visible.add(id);
+      if(this.memory[id]===-1) fresh++;
+      if(detail || this.memory[id]===-1)
+        this.memory[id]=detail && id===this.maze.start ? 3 : detail && id===this.maze.goal ? 2 : this.maze.grid[id];
+    };
+    this.range=0;
+    for(let d=0;d<this.maze.size;d++) {
+      const at=this.maze.offset(this.cell,d*dx,d*dy);
+      if(at<0) break;
+      reveal(at,d<=3);
+      if(!this.maze.open(at)) break;
+      this.range=d;
+      if(d<=3) {
+        reveal(this.maze.offset(at,-dy,dx),true);
+        reveal(this.maze.offset(at,dy,-dx),true);
+      }
+    }
+    return fresh;
+  }
+  canCharge() { return this.cell===this.maze.start && this.energy*2<=this.maze.capacity; }
+  observation() {
+    const n=this.maze.size, [dx,dy]=directions[this.heading], x=this.cell%n, y=Math.floor(this.cell/n);
+    const sx=this.maze.start%n, sy=Math.floor(this.maze.start/n);
+    const data=new Float32Array(inputs);
+    let index=0;
+    for(let row=0;row<9;row++) for(let col=0;col<9;col++){
+      const f=4-row, side=col-4;
+      const id=this.maze.offset(this.cell,f*dx-side*dy,f*dy+side*dx);
+      data[index+(id<0?2:this.memory[id]+1)]=1;
+      if(id>=0){data[index+5]=Number(this.visible.has(id));data[index+6]=Number(this.visited.has(id));}
+      index+=7;
+    }
+    const capacity=this.maze.capacity/2;
+    data.set([x/(n-1),y/(n-1),sx/(n-1),sy/(n-1),
+      ...directions.map((_,d)=>Number(d===this.heading)),this.energy/this.maze.capacity,
+      capacity/(1+capacity),Number(this.collision),
+      ((sx-x)*dx+(sy-y)*dy)/(2*(n-1)),(-(sx-x)*dy+(sy-y)*dx)/(2*(n-1)),
+      Math.min(this.turnStreak,24)/24,Math.min(this.noMove,24)/24,this.range/(n-1)],index);
+    return data;
+  }
+  step(action) {
+    const limit=Math.max(196,4*this.maze.size**2);
+    const before=this.cell;
+    let duration=1, reason='', charged=false;
+    this.collision=false;
+    if(action===3) {
+      if(this.canCharge() && this.turns+2<=limit) {
+        this.energy=this.maze.capacity; this.charges++; duration=2;charged=true;
+      }
+    } else {
+      const next=this.maze.next(this.cell,this.heading);
+      const cost=action===0?2:1;
+      if(this.energy<cost) reason='depleted';
+      else {
+        this.energy-=cost;
+        if(action!==0) this.heading=(this.heading+(action===1?3:1))%4;
+        else if(this.maze.open(next)) this.cell=next;
+        else this.collision=true;
+      }
+    }
+    this.turns+=duration;
+    this.observe();
+    const moved=before!==this.cell;
+    const firstVisit=moved&&!this.visited.has(this.cell);
+    this.visited.add(this.cell);
+    if(moved){
+      if(this.cell===this.maze.start && this.leftStation)this.returned=true;
+      if(this.cell!==this.maze.start)this.leftStation=true;
+    }
+    this.noMove=moved?0:this.noMove+1;
+    this.turnStreak=action===1||action===2?this.turnStreak+1:0;
+    let reward=-0.002*duration+(firstVisit?0.05:0);
+    if(this.collision)reward-=0.02;
+    if(this.turnStreak>2)reward-=0.02;
+    if(action===3&&!charged)reward-=0.02;
+    if(this.cell===this.maze.goal){reason='success';reward+=10;}
+    else if(reason==='depleted'||(this.energy===0&&this.cell!==this.maze.start)){reason='depleted';reward-=2;}
+    else if(this.turns>=limit){reason='limit';reward-=2;}
+    else if(this.noMove>=24){reason='stalled';reward-=2;}
+    if(!reason&&!charged) {
+      const heading=this.cell*4+this.heading;
+      this.history.push(heading);
+      if(this.history.length>64)this.history.shift();
+      if(this.history.filter(x=>x===heading).length>=4)reward-=0.02;
+    }
+    if(charged&&this.practice&&this.returned&&this.charges===1)reward+=0.5;
+    return {reward,reason};
+  }
+}
+
+class Policy {
+  constructor(rng, checkpoint) {
+    this.w=new Float32Array(parameterCount);
+    this.m=new Float32Array(parameterCount);
+    this.v=new Float32Array(parameterCount);
+    this.updates=0;
+    if(checkpoint) {
+      this.w.set(checkpoint.w); this.m.set(checkpoint.m); this.v.set(checkpoint.v);
+      this.updates=checkpoint.updates;
+    } else {
+      for(const l of layers) {
+        const scale=Math.sqrt(6/(l.input+l.output));
+        for(let i=l.weights;i<l.bias;i++)this.w[i]=(2*rng.next()-1)*scale;
+      }
+    }
+  }
+  evaluateNetwork(network,x) {
+    const activations=[x];
+    for(const [index,l] of network.entries()){
+      const previous=activations[index], out=new Float32Array(l.output);
+      for(let j=0;j<l.output;j++){
+        let sum=this.w[l.bias+j];
+        const offset=l.weights+j*l.input;
+        for(let i=0;i<l.input;i++)sum+=this.w[offset+i]*previous[i];
+        out[j]=index===network.length-1?sum:Math.tanh(sum);
+      }
+      activations.push(out);
+    }
+    return activations;
+  }
+  forward(x,charge) {
+    const pi=this.evaluateNetwork(actor,x), vf=this.evaluateNetwork(critic,x);
+    const z=Array.from(pi.at(-1));
+    if(!charge)z[3]=-Infinity;
+    const max=Math.max(...z);
+    const p=z.map(v=>Math.exp(v-max));
+    const total=p.reduce((a,b)=>a+b);
+    return {pi,vf,p:p.map(v=>v/total),value:vf.at(-1)[0]};
+  }
+  backprop(network, activations, delta, gradient){
+    for(let k=network.length-1;k>=0;k--){
+      const l=network[k], input=activations[k], back=k?new Float64Array(l.input):null;
+      for(let j=0;j<l.output;j++){
+        const offset=l.weights+j*l.input;
+        for(let i=0;i<l.input;i++){
+          gradient[offset+i]+=delta[j]*input[i];
+          if(back)back[i]+=delta[j]*this.w[offset+i];
+        }
+        gradient[l.bias+j]+=delta[j];
+      }
+      if(back){
+        for(let i=0;i<back.length;i++)back[i]*=1-input[i]**2;
+        delta=back;
+      }
+    }
+  }
+  ppo(batch, bootstrap, rng) {
+    let gae=0, next=bootstrap, sum=0, square=0;
+    for(let i=batch.length-1;i>=0;i--){
+      const item=batch[i], alive=item.done?0:1;
+      gae=item.reward+0.99*alive*next-item.value+0.99*0.95*alive*gae;
+      item.adv=gae; item.target=gae+item.value;
+      sum+=gae; square+=gae*gae; next=item.value;
+    }
+    const mean=sum/batch.length;
+    const deviation=Math.sqrt(Math.max(0,square/batch.length-mean*mean))+1e-8;
+    const order=batch.map((_,i)=>i);
+    for(let epoch=0;epoch<4;epoch++){
+      for(let j=order.length-1;j>0;j--){
+        const k=Math.floor(rng.next()*(j+1));
+        [order[j],order[k]]=[order[k],order[j]];
+      }
+      for(let start=0;start<order.length;start+=64){
+        const count=Math.min(64,order.length-start);
+        const gradient=new Float64Array(parameterCount);
+        for(let k=0;k<count;k++){
+          const sample=batch[order[start+k]];
+          const {pi,vf,p,value}=this.forward(sample.x,sample.charge);
+          const ratio=p[sample.action]/sample.prob;
+          const advantage=(sample.adv-mean)/deviation;
+          const clipped=(advantage>=0 && ratio>1.2)||(advantage<0 && ratio<0.8);
+          const actorWeight=clipped?0:-advantage*ratio;
+          const entropy=p.reduce((acc,v)=>acc-(v?v*Math.log(v):0),0);
+          const actorDelta=p.map((prob,j)=>actorGradient(j,prob));
+          function actorGradient(j,prob){
+            return actorWeight*(Number(j===sample.action)-prob)+(prob?0.02*prob*(Math.log(prob)+entropy):0);
+          }
+          this.backprop(actor,pi,actorDelta,gradient);
+          this.backprop(critic,vf,[value-sample.target],gradient);
+        }
+        this.updates++;
+        const norm=Math.sqrt(gradient.reduce((sum,g)=>sum+g*g,0))/count, scale=Math.min(1,0.5/(norm||1))/count;
+        const secondMomentCorrection=Math.sqrt(1-0.999**this.updates);
+        const rate=0.0003*secondMomentCorrection/(1-0.9**this.updates);
+        for(let i=0;i<this.w.length;i++){
+          const g=gradient[i]*scale;
+          this.m[i]=0.9*this.m[i]+0.1*g;
+          this.v[i]=0.999*this.v[i]+0.001*g*g;
+          this.w[i]-=rate*this.m[i]/(Math.sqrt(this.v[i])+1e-5*secondMomentCorrection);
+        }
+      }
+    }
+  }
+}
+
+const statsFields=['episodes','navigation','success','practice','charge','depleted','successfulTurns'];
+function validate(c) {
+  if(!c || c.format!==format || !['steps','updates','seed'].every(k=>Number.isSafeInteger(c[k]) && c[k]>=0) ||
+     c.seed>4294967295 || !['w','m','v'].every(k=>Array.isArray(c[k]) && c[k].length===parameterCount &&
+       c[k].every(x=>Number.isFinite(x) && Math.abs(x)<1e6 && (k!=='v' || x>=0))) ||
+     !c.stats || !statsFields.every(k=>Number.isSafeInteger(c.stats[k]) && c.stats[k]>=0))
+    throw new Error('이 브라우저 학습기로 만든 체크포인트 JSON을 선택하세요.');
+  return c;
+}
+
+let running=false, stop=false;
+async function train({size,steps,practice,seed,checkpoint}) {
+  if(running) return;
+  running=true; stop=false;
+  try{
+    const initial=checkpoint?validate(checkpoint):null;
+    if(![7,15,31,64].includes(size) || !Number.isInteger(steps) || steps<128 || steps>10000000 ||
+       !Number.isInteger(seed) || seed<0 || seed>4294967295 || !(practice>=0 && practice<=1))
+      throw new Error('학습 입력 범위를 확인하세요.');
+    const rng=new Random(initial?initial.seed:seed);
+    const policy=new Policy(rng,initial);
+    let env=new Robot(size,rng,practice);
+    const stats=initial?{...initial.stats}:Object.fromEntries(statsFields.map(k=>[k,0]));
+    let completed=0,lastSave=0,lastStatus=-Infinity;
+    const snapshot=()=>({format,size,steps:(initial?.steps||0)+completed,seed:rng.state,updates:policy.updates,
+      w:Array.from(policy.w),m:Array.from(policy.m),v:Array.from(policy.v),stats:{...stats}});
+    while(completed<steps && !stop){
+      const batch=[];
+      for(let i=0;i<128 && completed<steps;i++){
+        const x=env.observation(), charge=env.canCharge();
+        const {p,value}=policy.forward(x,charge);
+        let roll=rng.next(), action=0;
+        while(action<3 && roll>=p[action]) {roll-=p[action];action++;}
+        if(p[action]===0) action=p.findLastIndex(v=>v>0);
+        const {reward,reason}=env.step(action);
+        // SB3 bootstraps time-limit truncations using the final observation.
+        const truncated=reason==='limit'||reason==='stalled';
+        const adjustedReward=reward+(truncated?0.99*policy.forward(env.observation(),env.canCharge()).value:0);
+        batch.push({x,charge,action,prob:p[action],value,reward:adjustedReward,done:Boolean(reason)});
+        completed++;
+        if(reason){
+          stats.episodes++;
+          if(env.practice) {stats.practice++; if(env.charges) stats.charge++;}
+          else {
+            stats.navigation++;
+            if(reason==='success'){stats.success++;stats.successfulTurns+=env.turns;}
+          }
+          if(reason==='depleted') stats.depleted++;
+          env=new Robot(size,rng,practice);
+        }
+      }
+      policy.ppo(batch,policy.forward(env.observation(),env.canCharge()).value,rng);
+      if(performance.now()-lastStatus>=150 || completed===steps) {
+        postMessage({kind:'progress',completed,target:steps,total:(initial?.steps||0)+completed,stats,
+          map:Array.from(env.memory),cell:env.cell,heading:env.heading,size});
+        lastStatus=performance.now();
+      }
+      if(completed-lastSave>=1024) {postMessage({kind:'checkpoint',checkpoint:snapshot()});lastSave=completed;}
+      await pause();
+    }
+    postMessage({kind:'finished',checkpoint:snapshot(),completed,target:steps,stopped:stop});
+  } catch(error) {postMessage({kind:'error',message:error.message});}
+  finally {running=false;}
+}
+
+const decoder=new TextDecoder();
+const maxArchive=32*1024*1024;
+function bounded(bytes, position, count) {
+  if(position<0||count<0||position+count>bytes.length)throw Error('ZIP 파일 구조를 읽을 수 없습니다.');
+  return bytes.subarray(position,position+count);
+}
+async function unzip(bytes) {
+  if(bytes.length>maxArchive)throw Error('ZIP 파일이 너무 큽니다.');
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const u16=p=>view.getUint16(p,true),u32=p=>view.getUint32(p,true);
+  let end=bytes.length-22;
+  for(;end>=Math.max(0,bytes.length-65557);end--)if(u32(end)===0x06054b50&&end+22+u16(end+20)===bytes.length)break;
+  if(end<0||u32(end)!==0x06054b50||u16(end+4)||u16(end+6)||u16(end+10)>500)throw Error('지원하지 않는 ZIP입니다.');
+  const entries=new Map();
+  let position=u32(end+16),total=0;
+  for(let i=0;i<u16(end+10);i++) {
+    if(u32(position)!==0x02014b50)throw Error('ZIP 목록을 읽을 수 없습니다.');
+    const flags=u16(position+8),method=u16(position+10),length=u32(position+20),size=u32(position+24);
+    const nameLength=u16(position+28),offset=u32(position+42);
+    const name=decoder.decode(bounded(bytes,position+46,nameLength));
+    position+=46+nameLength+u16(position+30)+u16(position+32);
+    if(flags&1||![0,8].includes(method)||entries.has(name)||u32(offset)!==0x04034b50)throw Error('지원하지 않는 ZIP 항목입니다.');
+    total+=size;
+    if(total>maxArchive)throw Error('압축을 푼 파일이 너무 큽니다.');
+    const compressed=bounded(bytes,offset+30+u16(offset+26)+u16(offset+28),length);
+    entries.set(name,async()=>{
+      if(method===0){
+        if(compressed.length!==size)throw Error('ZIP 항목 크기가 일치하지 않습니다.');
+        return compressed;
+      }
+      const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+      const result=new Uint8Array(size);
+      let written=0;
+      for(;;) {
+        const {done,value}=await stream.read();
+        if(done)break;
+        if(written+value.length>size){await stream.cancel();throw Error('ZIP 항목 크기가 일치하지 않습니다.');}
+        result.set(value,written);written+=value.length;
+      }
+      if(written!==size)throw Error('ZIP 항목 크기가 일치하지 않습니다.');
+      return result;
+    });
+  }
+  return entries;
+}
+
+// Interpret the data-only subset used by PyTorch state dictionaries. Global
+// names are inert strings. No Python objects or functions are ever executed.
+function tensorIndex(bytes) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength), mark=Symbol();
+  const stack=[],memo=new Map();
+  let i=0;
+  const get=n=>{const out=bounded(bytes,i,n);i+=n;return out;};
+  const byte=()=>get(1)[0];
+  const number=(length,signed=false)=>{get(length);return length===4?
+    (signed?view.getInt32(i-4,true):view.getUint32(i-4,true)):view.getUint16(i-2,true);};
+  const line=()=>{const end=bytes.indexOf(10,i);if(end<0)throw Error('잘못된 텐서 메타데이터');return decoder.decode(get(end-i+1)).slice(0,-1);};
+  const sinceMark=()=>{const at=stack.lastIndexOf(mark);if(at<0)throw Error('잘못된 텐서 목록');const values=stack.splice(at);return values.slice(1);};
+  const assign=(map,key,value)=>{if(!(map instanceof Map))throw Error('잘못된 텐서 사전');map.set(key,value);};
+  while(i<bytes.length && i<200000){
+    switch(byte()){
+      case 0x80: if(byte()!==2)throw Error('지원하지 않는 PyTorch 저장 형식');break;
+      case 0x2e: return stack.pop();
+      case 0x28: stack.push(mark);break;
+      case 0x29: stack.push([]);break;
+      case 0x7d: stack.push(new Map());break;
+      case 0x5d: stack.push([]);break;
+      case 0x4e: stack.push(null);break;
+      case 0x88: stack.push(true);break;
+      case 0x89: stack.push(false);break;
+      case 0x4b: stack.push(byte());break;
+      case 0x4d: stack.push(number(2));break;
+      case 0x4a: stack.push(number(4,true));break;
+      case 0x47: get(8);stack.push(view.getFloat64(i-8,false));break;
+      case 0x58: stack.push(decoder.decode(get(number(4))));break;
+      case 0x63: stack.push(line()+'.'+line());break;
+      case 0x71: memo.set(byte(),stack.at(-1));break;
+      case 0x72: memo.set(number(4),stack.at(-1));break;
+      case 0x68: stack.push(memo.get(byte()));break;
+      case 0x6a: stack.push(memo.get(number(4)));break;
+      case 0x74: stack.push(sinceMark());break;
+      case 0x85: stack.push(stack.splice(-1));break;
+      case 0x86: stack.push(stack.splice(-2));break;
+      case 0x87: stack.push(stack.splice(-3));break;
+      case 0x51: {
+        const [kind,type,id,location,length]=stack.pop();
+        if(kind!=='storage'||type!=='torch.FloatStorage'||!/^\d+$/.test(id)||typeof location!=='string'||
+          !Number.isInteger(length)||length<1||length>200000)throw Error('지원하지 않는 텐서 형식입니다.');
+        stack.push({id,length});break;
+      }
+      case 0x52: {
+        const args=stack.pop(),name=stack.pop();
+        if(name==='collections.OrderedDict'&&args.length===0)stack.push(new Map());
+        else if(name==='torch._utils._rebuild_tensor_v2'||name==='torch._utils._rebuild_tensor')
+          stack.push({storage:args[0],offset:args[1],shape:args[2],stride:args[3]});
+        else throw Error('지원하지 않는 PyTorch 메타데이터입니다.');
+        break;
+      }
+      case 0x73: {const value=stack.pop(),key=stack.pop();assign(stack.at(-1),key,value);break;}
+      case 0x75: {const values=sinceMark();for(let j=0;j<values.length;j+=2)assign(stack.at(-1),values[j],values[j+1]);break;}
+      case 0x61: {const value=stack.pop();stack.at(-1).push(value);break;}
+      case 0x65: {const values=sinceMark();stack.at(-1).push(...values);break;}
+      case 0x62: stack.pop();break; // Optional state_dict metadata is unused.
+      default: throw Error('지원하지 않는 PyTorch 저장 형식입니다.');
+    }
+  }
+  throw Error('PyTorch 텐서 목록이 비어 있습니다.');
+}
+async function loadTensors(bytes){
+  const zip=await unzip(bytes);
+  const key=[...zip.keys()].find(k=>k.endsWith('/data.pkl'));
+  if(!key)throw Error('PyTorch 텐서 목록을 찾을 수 없습니다.');
+  const prefix=key.slice(0,-8);
+  if(zip.has(prefix+'byteorder')&&decoder.decode(await zip.get(prefix+'byteorder')())!=='little')
+    throw Error('지원하지 않는 텐서 바이트 순서입니다.');
+  const index=tensorIndex(await zip.get(key)());
+  async function tensor(item,shape){
+    const {storage,offset,shape:actual,stride}=item||{};
+    if(!storage||!Array.isArray(actual)||actual.join()!==shape.join()||
+       stride.join()!==(shape.length===2?[shape[1],1]:shape.length?[1]:[]).join()||
+       !Number.isInteger(offset)||offset<0)throw Error('v3 모델의 텐서 구조가 일치하지 않습니다.');
+    const count=shape.reduce((a,b)=>a*b,1);
+    const raw=await zip.get(prefix+'data/'+storage.id)?.();
+    if(!raw||raw.length!==storage.length*4||offset+count>storage.length)throw Error('텐서 데이터를 찾을 수 없습니다.');
+    const view=new DataView(raw.buffer,raw.byteOffset,raw.byteLength);
+    return Array.from({length:count},(_,i)=>view.getFloat32(4*(offset+i),true));
+  }
+  return {index,tensor};
+}
+async function importPython(bytes, configuration) {
+  let zip=await unzip(bytes);
+  if(zip.has('model.zip')){
+    if(zip.has('config.json')) configuration=JSON.parse(decoder.decode(await zip.get('config.json')()));
+    zip=await unzip(await zip.get('model.zip')());
+  }
+  if(configuration&&configuration.profile!=='range-charge-v3')throw Error('기존 v3 모델만 지원합니다.');
+  if(!zip.has('policy.pth')||!zip.has('data'))throw Error('기존 v3 model.zip 또는 체크포인트 ZIP을 선택하세요.');
+  const training=JSON.parse(decoder.decode(await zip.get('data')()));
+  const steps=training.num_timesteps;
+  const policy=await loadTensors(await zip.get('policy.pth')());
+  const w=new Float32Array(parameterCount),m=new Float32Array(parameterCount),v=new Float32Array(parameterCount);
+  const groups=[];
+  // PyTorch creates optimizer states in actor, critic, action head, value head order.
+  for(const l of [actor[0],actor[1],critic[0],critic[1],actor[2],critic[2]]){
+    groups.push([l.name+'.weight',[l.output,l.input],l.weights],[l.name+'.bias',[l.output],l.bias]);
+  }
+  for(const [name,shape,offset] of groups) w.set(await policy.tensor(policy.index.get(name),shape),offset);
+  let updates=0, optimizer=false;
+  if(zip.has('policy.optimizer.pth')){
+    try {
+      const opt=await loadTensors(await zip.get('policy.optimizer.pth')());
+      const states=opt.index.get('state'), ids=opt.index.get('param_groups')?.[0]?.get('params');
+      if(ids?.length!==groups.length||new Set(ids).size!==groups.length)throw Error('옵티마이저 파라미터 수 불일치');
+      for(let i=0;i<groups.length;i++){
+        const [,shape,offset]=groups[i],state=states.get(ids[i]);
+        const value=state.get('step');
+        const step=typeof value==='number'?value:(await opt.tensor(value,[]))[0];
+        if(!Number.isSafeInteger(step)||step<0||(i&&step!==updates))throw Error('옵티마이저 갱신 횟수 불일치');
+        updates=step;
+        m.set(await opt.tensor(state.get('exp_avg'),shape),offset);
+        v.set(await opt.tensor(state.get('exp_avg_sq'),shape),offset);
+      }
+      optimizer=true;
+    } catch {updates=0;m.fill(0);v.fill(0);}
+  }
+  return validate({format,size:configuration?.environment?.size||64,seed:(training.seed??42)>>>0,steps,updates,
+    imported:optimizer?'weights-and-adam':'weights',w:Array.from(w),m:Array.from(m),v:Array.from(v),
+    stats:Object.fromEntries(statsFields.map(k=>[k,0]))});
+}
+
+onmessage=async ({data})=>{
+  if(data.kind==='prepare'){
+    if(typeof DecompressionStream!=='function'||typeof CompressionStream!=='function')
+      throw Error('ZIP 모델을 지원하는 최신 Chrome 또는 Edge가 필요합니다.');
+    postMessage({kind:'ready'});
+  }
+  if(data.kind==='import-python'){
+    try{postMessage({kind:'loaded',checkpoint:await importPython(new Uint8Array(data.bytes),data.config)});}
+    catch(error){postMessage({kind:'invalid',message:error.message});}
+  }
+  if(data.kind==='train') train(data);
+  if(data.kind==='stop') stop=true;
+  if(data.kind==='validate'){
+    try {postMessage({kind:'loaded',checkpoint:validate(data.checkpoint)});}
+    catch(error){postMessage({kind:'invalid',message:error.message});}
+  }
+};
+</script>
+<script>
+'use strict';
+const el=id=>document.getElementById(id);
+const status=el('status'), progress=el('progress');
+const canvas=el('map'), ctx=canvas.getContext('2d');
+const storageKey='rl-maze-browser-v3-2.checkpoint';
+let worker, active=false, saved=null, prepared=false, githubBusy=false, importing=false;
+const pct=(part,whole)=>whole ? (100*part/whole).toFixed(2)+'%' : '—';
+function display(total,s) {
+  el('total').textContent=total.toLocaleString('ko-KR');
+  el('episodes').textContent=s.episodes.toLocaleString('ko-KR');
+  el('success').textContent=pct(s.success,s.navigation);
+  el('charge').textContent=pct(s.charge,s.practice);
+  el('turns').textContent=s.success?(s.successfulTurns/s.success).toFixed(2):'—';
+  el('depleted').textContent=s.depleted.toLocaleString('ko-KR');
+}
+function buttons() {
+  el('start').disabled=active||githubBusy||!prepared||importing; el('resume').disabled=active||githubBusy||!saved||!prepared||importing;
+  el('stop').disabled=!active; el('save').disabled=!saved; el('file').disabled=active||importing;
+  el('github-list').disabled=el('github-load').disabled=active||githubBusy||importing;
+  el('github-save').disabled=!saved||active||githubBusy||importing;
+}
+function keep(checkpoint){
+  saved=checkpoint;
+  void checkpointStore('readwrite',store=>store.put(checkpoint,storageKey)).catch(()=>{});
+  buttons();
+}
+async function checkpointStore(mode,operation){
+  const db=await new Promise((resolve,reject)=>{
+    const req=indexedDB.open('rl-maze-web',1);
+    req.onupgradeneeded=()=>req.result.createObjectStore('checkpoints');
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+  try {
+    return await new Promise((resolve,reject)=>{
+      const transaction=db.transaction('checkpoints',mode);
+      const result=operation(transaction.objectStore('checkpoints'));
+      transaction.oncomplete=()=>resolve(result.result);
+      transaction.onerror=transaction.onabort=()=>reject(transaction.error);
+    });
+  } finally{db.close();}
+}
+function draw(data){
+  const {map,size,cell,heading}=data, unit=canvas.width/size;
+  const colors=['#536d7a','#263b47','#61d894','#f3ca77'];
+  for(let i=0;i<map.length;i++){
+    const x=Math.floor(i%size*unit),y=Math.floor(Math.floor(i/size)*unit);
+    ctx.fillStyle=colors[map[i]]||'#0c141c';
+    ctx.fillRect(x,y,Math.ceil(unit),Math.ceil(unit));
+  }
+  ctx.save();
+  ctx.translate((cell%size+0.5)*unit,(Math.floor(cell/size)+0.5)*unit);
+  ctx.rotate(heading*Math.PI/2);
+  ctx.fillStyle='#79dbff';ctx.beginPath();
+  ctx.moveTo(0,-unit*0.44);ctx.lineTo(unit*0.35,unit*0.28);ctx.lineTo(-unit*0.35,unit*0.28);
+  ctx.fill();ctx.restore();
+}
+function handle({data}) {
+  switch(data.kind) {
+    case 'ready':
+      prepared=true;buttons();el('ready').textContent='브라우저 학습 환경 준비 완료';
+      void checkpointStore('readonly',store=>store.get(storageKey)).then(value=>{
+        if(value&&!active&&!saved&&!importing)worker.postMessage({kind:'validate',checkpoint:value});
+      }).catch(()=>{});
+      break;
+    case 'progress':
+      progress.value=data.completed/data.target; display(data.total,data.stats); draw(data); break;
+    case 'checkpoint': keep(data.checkpoint); break;
+    case 'finished':
+      active=false; keep(data.checkpoint); display(saved.steps,saved.stats);
+      progress.value=data.completed/data.target;
+      status.textContent=data.stopped?'정지했습니다. 체크포인트를 다운로드할 수 있습니다.':'학습을 완료했습니다. 체크포인트를 다운로드할 수 있습니다.';
+      if(el('github-auto').checked&&data.completed>0)void githubAction(()=>uploadGitHub(data.checkpoint))();
+      break;
+    case 'loaded':
+      importing=false;keep(data.checkpoint); display(saved.steps,saved.stats);
+      if([7,15,31,64].includes(saved.size)) el('size').value=saved.size;
+      status.textContent=data.checkpoint.imported==='weights'?'가중치를 불러왔습니다. 옵티마이저를 초기화해 이어 학습합니다.':
+        data.checkpoint.imported==='weights-and-adam'?'v3 가중치와 Adam 상태를 불러왔습니다. 이어 학습을 누르세요.':'모델을 불러왔습니다. 이어 학습을 누르세요.';
+      el('github-status').textContent='';break;
+    case 'error': active=false; buttons(); status.textContent=data.message; break;
+    case 'invalid': importing=false;buttons();status.textContent=data.message;el('github-status').textContent='';break;
+  }
+}
+el('prepare').onclick=()=>{
+  if(worker)return;
+  const url=URL.createObjectURL(new Blob([el('worker').textContent],{type:'text/javascript'}));
+  try{worker=new Worker(url);}catch{URL.revokeObjectURL(url);el('ready').textContent='브라우저에서 학습 환경을 준비하지 못했습니다.';return;}
+  worker.onmessage=handle;
+  el('ready').textContent='학습 환경 확인 중…';
+  worker.postMessage({kind:'prepare'});
+  worker.onerror=()=>{active=false;prepared=false;importing=false;worker.terminate();worker=null;URL.revokeObjectURL(url);buttons();
+    status.textContent='브라우저에서 학습 작업을 시작하지 못했습니다. 이 HTML 파일을 Chrome 또는 Edge에서 열어 주세요.';};
+  window.addEventListener('pagehide',()=>URL.revokeObjectURL(url),{once:true});
+};
+buttons();
+function start(checkpoint) {
+  if(active||githubBusy||!prepared||importing) return;
+  if(el('github-auto').checked&&!el('token').value.trim()){status.textContent='자동 업로드에 사용할 GitHub 토큰을 입력하세요.';return;}
+  if(!['steps','seed','practice'].every(id=>el(id).value!=='' && el(id).checkValidity())){
+    status.textContent='학습 스텝, 시드, 귀환 연습 비율의 범위를 확인하세요.'; return;
+  }
+  active=true;buttons();progress.value=0;status.textContent='이 PC에서 학습 중…';
+  worker.postMessage({kind:'train',size:Number(el('size').value),steps:Number(el('steps').value),
+    seed:Number(el('seed').value),practice:Number(el('practice').value)/100,checkpoint});
+}
+el('start').onclick=()=>start(null);
+el('resume').onclick=()=>start(saved);
+el('stop').onclick=()=>{el('stop').disabled=true;status.textContent='현재 학습 묶음을 마친 뒤 정지합니다…';worker.postMessage({kind:'stop'});};
+el('save').onclick=()=>{
+  if(!saved)return;
+  const url=URL.createObjectURL(new Blob([JSON.stringify(saved)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download='maze-ppo-'+saved.steps+'-steps.json';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+el('file').onchange=async event=>{
+  const file=event.target.files[0];event.target.value='';
+  if(!file||active||importing)return;
+  if(!prepared){status.textContent='먼저 학습 환경 준비를 누르세요.';return;}
+  importing=true;buttons();
+  try{
+    if(file.size>32*1024*1024)throw Error();
+    if(/\.zip$/i.test(file.name))loadPython(new Uint8Array(await file.arrayBuffer()));
+    else worker.postMessage({kind:'validate',checkpoint:JSON.parse(await file.text())});
+  }catch{importing=false;buttons();status.textContent='v3 ZIP이나 웹 학습기의 JSON 파일을 선택하세요.';}
+};
+const repository='GAON213193/RL-Maze-Explorer';
+const githubRoot='https://api.github.com/repos/'+repository;
+const modelBranch='models';
+async function github(path,options={}){
+  const token=el('token').value.trim();
+  const headers={Accept:'application/vnd.github+json',...options.headers};
+  if(token)headers.Authorization='Bearer '+token;
+  const response=await fetch(githubRoot+path,{...options,headers,cache:'no-store'});
+  if(!response.ok)throw Error('GitHub 요청 실패 (HTTP '+response.status+'). 저장소 접근 권한이나 네트워크를 확인하세요.');
+  return response;
+}
+const githubJson=async(path,options)=> (await github(path,options)).json();
+const entries=new Map();
+async function listGitHub(){
+  const [tree,releases]=await Promise.allSettled([
+    githubJson('/git/trees/'+modelBranch+'?recursive=1'),
+    githubJson('/releases?per_page=100')
+  ]);
+  if(tree.status==='rejected'&&releases.status==='rejected')throw tree.reason;
+  entries.clear();
+  if(tree.status==='fulfilled')for(const item of tree.value.tree){
+    const files=item.path.match(/^checkpoints\/(ppo-v3-[^/]+)\/model\.zip$/);
+    const web=item.path.match(/^browser-checkpoints\/[^/]+\.json\.gz$/);
+    if(item.type==='blob'&&(files||web))
+      entries.set(item.path,{label:files?'Python · '+files[1]:'웹 · '+item.path.split('/').at(-1).replace('.json.gz',''),
+        path:item.path,sha:item.sha,type:web?'web':'python'});
+  }
+  if(releases.status==='fulfilled')for(const release of releases.value){
+    if(release.draft||!release.tag_name.startsWith('ppo-v3-'))continue;
+    for(const asset of release.assets)if(/^checkpoint-\d+\.zip$/.test(asset.name))
+      entries.set('release:'+asset.id,{label:'Release · '+release.tag_name+' · '+Number(asset.name.match(/\d+/)[0]).toLocaleString()+' 스텝',
+        type:'release',id:asset.id,url:asset.browser_download_url});
+  }
+  el('github-model').replaceChildren(new Option('GitHub 모델을 선택하세요',''),...[...entries].reverse().map(([key,item])=>new Option(item.label,key)));
+  el('github-status').textContent=entries.size+'개 체크포인트를 찾았습니다.';
+}
+async function blobBytes(sha){
+  const blob=await githubJson('/git/blobs/'+sha);
+  if(blob.encoding!=='base64'||blob.size>32*1024*1024)throw Error('지원하지 않는 GitHub 모델 파일입니다.');
+  return Uint8Array.from(atob(blob.content.replace(/\s/g,'')),x=>x.charCodeAt(0));
+}
+const decompress=async bytes=>new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
+function loadPython(bytes,config){
+  importing=true;buttons();
+  worker.postMessage({kind:'import-python',bytes:bytes.buffer,config},[bytes.buffer]);
+}
+async function loadGitHub(){
+  if(!prepared)throw Error('먼저 학습 환경 준비를 누르세요.');
+  const item=entries.get(el('github-model').value);
+  if(!item)throw Error('GitHub 모델을 선택하세요.');
+  el('release-download').hidden=true;
+  if(item.type==='release'){
+    try {
+      const response=await github('/releases/assets/'+item.id,{headers:{Accept:'application/octet-stream'}});
+      if(response.headers.get('content-type')?.includes('json'))throw Error();
+      const bytes=new Uint8Array(await response.arrayBuffer());
+      loadPython(bytes);return;
+    } catch {
+      const a=el('release-download');a.href=item.url;a.hidden=false;
+      throw Error('이 Release는 브라우저에서 직접 다운로드 제한이 있습니다. 링크로 ZIP을 받은 뒤 위 파일 선택에서 열어 주세요.');
+    }
+  }
+  const bytes=await blobBytes(item.sha);
+  if(item.type==='web'){const checkpoint=await decompress(bytes);importing=true;buttons();worker.postMessage({kind:'validate',checkpoint});return;}
+  const configPath=item.path.replace(/model\.zip$/,'config.json').split('/').map(encodeURIComponent).join('/');
+  const meta=await githubJson('/contents/'+configPath+'?ref='+modelBranch);
+  loadPython(bytes,JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(meta.content.replace(/\s/g,'')),x=>x.charCodeAt(0)))));
+}
+async function uploadGitHub(checkpoint){
+  if(!checkpoint)throw Error('저장할 학습 모델이 없습니다.');
+  if(!el('token').value.trim())throw Error('GitHub 업로드 권한이 있는 토큰을 입력하세요.');
+  const data=new Blob([JSON.stringify(checkpoint)]).stream().pipeThrough(new CompressionStream('gzip'));
+  const bytes=new Uint8Array(await new Response(data).arrayBuffer());
+  let binary='';
+  for(let i=0;i<bytes.length;i+=16384)binary+=String.fromCharCode(...bytes.subarray(i,i+16384));
+  const timestamp=new Date().toISOString().replace(/[^0-9]/g,'');
+  const name='web-v3-'+timestamp+'-'+crypto.getRandomValues(new Uint32Array(1))[0].toString(16)+'-'+checkpoint.steps+'.json.gz';
+  await githubJson('/contents/browser-checkpoints/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message:'Save browser PPO v3 checkpoint ('+checkpoint.steps+' steps)',branch:modelBranch,content:btoa(binary)})});
+  el('github-status').textContent='models 브랜치에 '+checkpoint.steps.toLocaleString()+'스텝 체크포인트를 저장했습니다.';
+}
+function githubAction(action){
+  return async()=>{
+    if(active||githubBusy)return;
+    githubBusy=true;buttons();el('github-status').textContent='GitHub 요청 중…';
+    try{await action();if(el('github-status').textContent==='GitHub 요청 중…')el('github-status').textContent='모델 파일을 읽는 중입니다.';}
+    catch(error){el('github-status').textContent=error.message;}
+    finally{githubBusy=false;buttons();}
+  };
+}
+el('github-list').onclick=githubAction(listGitHub);
+el('github-load').onclick=githubAction(loadGitHub);
+el('github-save').onclick=githubAction(()=>uploadGitHub(saved));
+</script>
+</html>
