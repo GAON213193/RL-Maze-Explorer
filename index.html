@@ -25,6 +25,7 @@
 <button id="start" class="primary" disabled>새 학습</button><button id="resume" disabled>이어 학습</button><button id="stop" disabled>저장 후 정지</button><button id="save" disabled>모델 다운로드</button>
 <label>모델 불러오기 <input id="file" type="file" accept=".json,.zip,application/json,application/zip"></label>
 </div>
+<p><span id="model-selection">선택한 모델 없음</span> <button id="toggle-model" type="button" disabled>모델 선택 해제</button></p>
 <p id="status" role="status">대기 중</p><progress id="progress" max="1" value="0" aria-label="학습 진행률"></progress>
 </section>
 <section>
@@ -645,7 +646,7 @@ const el=id=>document.getElementById(id);
 const status=el('status'), progress=el('progress');
 const canvas=el('map'), ctx=canvas.getContext('2d');
 const storageKey='rl-maze-browser-v3-2.checkpoint';
-let worker, active=false, saved=null, prepared=false, githubBusy=false, importing=false;
+let worker, active=false, saved=null, modelSelected=false, prepared=false, githubBusy=false, importing=false;
 const pct=(part,whole)=>whole ? (100*part/whole).toFixed(2)+'%' : '—';
 function display(total,s) {
   el('total').textContent=total.toLocaleString('ko-KR');
@@ -656,13 +657,19 @@ function display(total,s) {
   el('depleted').textContent=s.depleted.toLocaleString('ko-KR');
 }
 function buttons() {
-  el('start').disabled=active||githubBusy||!prepared||importing; el('resume').disabled=active||githubBusy||!saved||!prepared||importing;
+  const unavailable=active||githubBusy||!prepared||importing;
+  el('start').disabled=unavailable||modelSelected;
+  el('resume').disabled=unavailable||!modelSelected;
+  el('toggle-model').disabled=unavailable||!saved;
+  el('toggle-model').textContent=modelSelected?'모델 선택 해제':'최근 모델 다시 선택';
+  el('model-selection').textContent=modelSelected?`선택한 모델 · ${saved.steps.toLocaleString('ko-KR')}스텝`:'선택한 모델 없음';
   el('stop').disabled=!active; el('save').disabled=!saved; el('file').disabled=active||importing;
   el('github-list').disabled=el('github-load').disabled=active||githubBusy||importing;
   el('github-save').disabled=!saved||active||githubBusy||importing;
 }
 function keep(checkpoint){
   saved=checkpoint;
+  modelSelected=true;
   void checkpointStore('readwrite',store=>store.put(checkpoint,storageKey)).catch(()=>{});
   buttons();
 }
@@ -735,8 +742,9 @@ el('prepare').onclick=()=>{
   window.addEventListener('pagehide',()=>URL.revokeObjectURL(url),{once:true});
 };
 buttons();
-function start(checkpoint) {
-  if(active||githubBusy||!prepared||importing) return;
+function start(resume) {
+  if(active||githubBusy||!prepared||importing||resume!==modelSelected) return;
+  const checkpoint=resume?saved:null;
   if(el('github-auto').checked&&!el('token').value.trim()){status.textContent='자동 업로드에 사용할 GitHub 토큰을 입력하세요.';return;}
   if(!['steps','seed','practice'].every(id=>el(id).value!=='' && el(id).checkValidity())){
     status.textContent='학습 스텝, 시드, 귀환 연습 비율의 범위를 확인하세요.'; return;
@@ -745,8 +753,14 @@ function start(checkpoint) {
   worker.postMessage({kind:'train',size:Number(el('size').value),steps:Number(el('steps').value),
     seed:Number(el('seed').value),practice:Number(el('practice').value)/100,checkpoint});
 }
-el('start').onclick=()=>start(null);
-el('resume').onclick=()=>start(saved);
+el('start').onclick=()=>start(false);
+el('resume').onclick=()=>start(true);
+el('toggle-model').onclick=()=>{
+  if(el('toggle-model').disabled)return;
+  modelSelected=!modelSelected;
+  buttons();
+  status.textContent=modelSelected?'모델을 선택했습니다. 이어 학습을 누르세요.':'모델 선택을 해제했습니다. 새 학습을 시작할 수 있습니다.';
+};
 el('stop').onclick=()=>{el('stop').disabled=true;status.textContent='현재 학습 묶음을 마친 뒤 정지합니다…';worker.postMessage({kind:'stop'});};
 el('save').onclick=()=>{
   if(!saved)return;
